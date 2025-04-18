@@ -1,97 +1,57 @@
-# LLM Spam Filter Configuration
-
-# Server configuration
 server:
-  # Filter type: "postfix"
   filter_type: "postfix"
-  # Listen address for the filter
   listen_address: "0.0.0.0:10025"
-  # Whether to block spam emails (true) or just add headers (false)
   block_spam: false
-  # Headers to add to emails
   headers:
     spam: "X-Spam-Status"
     score: "X-Spam-Score"
     reason: "X-Spam-Reason"
+  postfix:
+    enabled: true
+    address: "127.0.0.1"
+    port: 10026
 
-# LLM provider configuration
 llm:
-  # Provider type: "bedrock", "gemini", or "openai"
-  provider: "bedrock"
+  provider: "bedrock"  # Options: "bedrock", "gemini", "openai"
 
-# Amazon Bedrock configuration (used when provider is "bedrock")
 bedrock:
-  # AWS region
   region: "us-east-1"
-  # Model ID to use
   model_id: "anthropic.claude-v2"
-  # Maximum tokens to generate
   max_tokens: 1000
-  # Temperature for generation (0.0 to 1.0)
   temperature: 0.1
-  # Top-p for generation (0.0 to 1.0)
   top_p: 0.9
-  # Maximum body size in bytes to send to the LLM (0 for no limit)
   max_body_size: 4096
 
-# Google Gemini configuration (used when provider is "gemini")
 gemini:
-  # API key for Google Gemini
-  api_key: "your-gemini-api-key"
-  # Model name to use
+  api_key: ""
   model_name: "gemini-pro"
-  # Maximum tokens to generate
   max_tokens: 1000
-  # Temperature for generation (0.0 to 1.0)
   temperature: 0.1
-  # Top-p for generation (0.0 to 1.0)
   top_p: 0.9
-  # Maximum body size in bytes to send to the LLM (0 for no limit)
   max_body_size: 4096
 
-# OpenAI configuration (used when provider is "openai")
 openai:
-  # API key for OpenAI
-  api_key: "your-openai-api-key"
-  # Model name to use
+  api_key: ""
   model_name: "gpt-4"
-  # Maximum tokens to generate
   max_tokens: 1000
-  # Temperature for generation (0.0 to 1.0)
   temperature: 0.1
-  # Top-p for generation (0.0 to 1.0)
   top_p: 0.9
-  # Maximum body size in bytes to send to the LLM (0 for no limit)
   max_body_size: 4096
 
-# Spam detection configuration
 spam:
-  # Threshold for spam detection (0.0 to 1.0)
   threshold: 0.7
-  # List of whitelisted domains that will always bypass spam checking
   whitelisted_domains:
     - "example.com"
     - "trusted-company.org"
-    - "internal-domain.net"
 
-# Cache configuration
 cache:
-  # Cache type: "memory", "sqlite", or "mysql"
-  type: "memory"
-  # Whether to enable caching
+  type: "memory"  # Options: "memory", "sqlite", "mysql"
   enabled: true
-  # Time-to-live for cache entries
   ttl: "24h"
-  # Cleanup frequency
   cleanup_frequency: "1h"
-  # SQLite database path (only used if type is "sqlite")
   sqlite_path: "/data/spam_cache.db"
-  # MySQL connection string (only used if type is "mysql")
   mysql_dsn: "user:password@tcp(localhost:3306)/spam_filter"
 
-# Logging configuration
 logging:
-  # Log level: "debug", "info", "warn", "error"
   level: "info"
-  # Log format: "json" or "console"
   format: "json"

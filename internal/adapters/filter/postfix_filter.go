@@ -1,30 +1,34 @@
 package filter
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/mail"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/emersion/go-smtp"
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"go.uber.org/zap"
 )
 
 // PostfixFilter implements a Postfix content filter
 type PostfixFilter struct {
-	service      *core.SpamFilterService
-	logger       *zap.Logger
-	listenAddr   string
-	listener     net.Listener
-	blockSpam    bool
-	spamHeader   string
-	scoreHeader  string
-	reasonHeader string
+	service        *core.SpamFilterService
+	logger         *zap.Logger
+	listenAddr     string
+	server         *smtp.Server
+	blockSpam      bool
+	spamHeader     string
+	scoreHeader    string
+	reasonHeader   string
+	postfixAddr    string
+	postfixPort    int
+	postfixEnabled bool
 }
 
 // NewPostfixFilter creates a new Postfix content filter
@@ -36,146 +40,224 @@ func NewPostfixFilter(
 	spamHeader string,
 	scoreHeader string,
 	reasonHeader string,
+	postfixAddr string,
+	postfixPort int,
+	postfixEnabled bool,
 ) *PostfixFilter {
 	return &PostfixFilter{
-		service:      service,
-		logger:       logger,
-		listenAddr:   listenAddr,
-		blockSpam:    blockSpam,
-		spamHeader:   spamHeader,
-		scoreHeader:  scoreHeader,
-		reasonHeader: reasonHeader,
+		service:        service,
+		logger:         logger,
+		listenAddr:     listenAddr,
+		blockSpam:      blockSpam,
+		spamHeader:     spamHeader,
+		scoreHeader:    scoreHeader,
+		reasonHeader:   reasonHeader,
+		postfixAddr:    postfixAddr,
+		postfixPort:    postfixPort,
+		postfixEnabled: postfixEnabled,
 	}
 }
 
 // Start starts the Postfix filter service
 func (f *PostfixFilter) Start() error {
-	var err error
-	f.listener, err = net.Listen("tcp", f.listenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", f.listenAddr, err)
-	}
+	// Create a new SMTP server
+	f.server = smtp.NewServer(&smtpBackend{filter: f})
 	
-	f.logger.Info("Postfix filter started", zap.String("address", f.listenAddr))
+	// Configure the server
+	f.server.Addr = f.listenAddr
+	f.server.Domain = "localhost"
+	f.server.ReadTimeout = 30 * time.Second
+	f.server.WriteTimeout = 30 * time.Second
+	f.server.MaxMessageBytes = 30 * 1024 * 1024 // 30MB
+	f.server.MaxRecipients = 50
+	f.server.AllowInsecureAuth = true
 	
-	go f.acceptConnections()
+	f.logger.Info("Postfix filter starting", zap.String("address", f.listenAddr))
+	
+	// Start the server in a goroutine
+	go func() {
+		if err := f.server.ListenAndServe(); err != nil {
+			if err != smtp.ErrServerClosed {
+				f.logger.Error("SMTP server error", zap.Error(err))
+			}
+		}
+	}()
 	
 	return nil
 }
 
 // Stop stops the Postfix filter service
 func (f *PostfixFilter) Stop() error {
-	if f.listener != nil {
-		return f.listener.Close()
+	if f.server != nil {
+		return f.server.Close()
 	}
 	return nil
 }
 
-// acceptConnections accepts incoming connections from Postfix
-func (f *PostfixFilter) acceptConnections() {
-	for {
-		conn, err := f.listener.Accept()
-		if err != nil {
-			// Check if the listener was closed
-			if strings.Contains(err.Error(), "use of closed network connection") {
-				return
-			}
-			f.logger.Error("Failed to accept connection", zap.Error(err))
-			continue
-		}
-		
-		go f.handleConnection(conn)
-	}
+// ProcessEmail processes an email and returns the filtering result
+// This is mainly used for testing or direct API calls
+func (f *PostfixFilter) ProcessEmail(ctx context.Context, email *core.Email) (*core.SpamAnalysisResult, error) {
+	return f.service.AnalyzeEmail(ctx, email)
 }
 
-// handleConnection processes a single connection from Postfix
-func (f *PostfixFilter) handleConnection(conn net.Conn) {
-	defer conn.Close()
+// sendToPostfix sends the processed email back to Postfix on the configured port using go-smtp
+func (f *PostfixFilter) sendToPostfix(sender string, recipients []string, emailData []byte) error {
+	// Connect to Postfix using go-smtp
+	postfixAddr := fmt.Sprintf("%s:%d", f.postfixAddr, f.postfixPort)
 	
-	// Set a timeout for the connection
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		f.logger.Error("Failed to set connection deadline", zap.Error(err))
-		return
+	// Get hostname for EHLO
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "localhost"
 	}
 	
-	// Read the entire message into a buffer
-	reader := bufio.NewReader(conn)
-	var messageBuffer bytes.Buffer
+	// Connect to the server with a timeout
+	conn, err := net.DialTimeout("tcp", postfixAddr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Postfix: %w", err)
+	}
 	
-	// Read until we find the end of message marker "."
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			f.logger.Error("Failed to read message", zap.Error(err))
-			fmt.Fprintf(conn, "500 Failed to read message\n")
-			return
+	// Set a deadline for the connection
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to set connection deadline: %w", err)
+	}
+	
+	// Create a client
+	c := smtp.NewClient(conn)
+	defer c.Close()
+	
+	// Send EHLO
+	if err := c.Hello(hostname); err != nil {
+		return fmt.Errorf("EHLO failed: %w", err)
+	}
+	
+	// Set the sender
+	if err := c.Mail(sender, nil); err != nil {
+		return fmt.Errorf("MAIL FROM failed: %w", err)
+	}
+	
+	// Set the recipients
+	recipientOK := false
+	for _, recipient := range recipients {
+		if err := c.Rcpt(recipient, nil); err != nil {
+			f.logger.Warn("RCPT TO failed for recipient", 
+				zap.String("recipient", recipient),
+				zap.Error(err))
+			// Continue with other recipients even if one fails
+		} else {
+			recipientOK = true
 		}
-		
-		// Check for end of message
-		if line == ".\r\n" || line == ".\n" {
-			break
-		}
-		
-		// Handle dot-stuffing (RFC 5321)
-		if strings.HasPrefix(line, "..") {
-			line = line[1:]
-		}
-		
-		messageBuffer.WriteString(line)
+	}
+	
+	if !recipientOK {
+		return fmt.Errorf("all recipients were rejected")
+	}
+	
+	// Send the email data
+	wc, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("DATA command failed: %w", err)
+	}
+	
+	_, err = wc.Write(emailData)
+	if err != nil {
+		wc.Close()
+		return fmt.Errorf("failed to send email data: %w", err)
+	}
+	
+	if err := wc.Close(); err != nil {
+		return fmt.Errorf("failed to close data writer: %w", err)
+	}
+	
+	// Quit the connection
+	if err := c.Quit(); err != nil {
+		f.logger.Warn("QUIT command failed", zap.Error(err))
+		// Not returning an error here as the email has already been sent
+	}
+	
+	return nil
+}
+
+// smtpBackend implements the go-smtp Backend interface
+type smtpBackend struct {
+	filter *PostfixFilter
+}
+
+// NewSession creates a new SMTP session
+func (b *smtpBackend) NewSession(c *smtp.Conn) (smtp.Session, error) {
+	return &smtpSession{
+		filter:     b.filter,
+		recipients: make([]string, 0),
+	}, nil
+}
+
+// smtpSession implements the go-smtp Session interface
+type smtpSession struct {
+	filter     *PostfixFilter
+	sender     string
+	recipients []string
+	data       []byte
+}
+
+// Reset resets the session state
+func (s *smtpSession) Reset() {
+	s.sender = ""
+	s.recipients = make([]string, 0)
+	s.data = nil
+}
+
+// AuthPlain handles PLAIN authentication (not needed for our filter)
+func (s *smtpSession) AuthPlain(_ []byte) error {
+	return smtp.ErrAuthUnsupported
+}
+
+// Mail sets the sender address
+func (s *smtpSession) Mail(from string, _ *smtp.MailOptions) error {
+	s.sender = from
+	return nil
+}
+
+// Rcpt adds a recipient
+func (s *smtpSession) Rcpt(to string, _ *smtp.RcptOptions) error {
+	s.recipients = append(s.recipients, to)
+	return nil
+}
+
+// Data handles the email data
+func (s *smtpSession) Data(r io.Reader) error {
+	// Read the message data
+	data, err := io.ReadAll(r)
+	if err != nil {
+		s.filter.logger.Error("Failed to read message data", zap.Error(err))
+		return err
 	}
 	
 	// Parse the email message
-	msg, err := mail.ReadMessage(&messageBuffer)
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
 	if err != nil {
-		f.logger.Error("Failed to parse email message", zap.Error(err))
-		fmt.Fprintf(conn, "500 Failed to parse email message\n")
-		return
+		s.filter.logger.Error("Failed to parse email message", zap.Error(err))
+		return err
 	}
 	
 	// Read the message body
 	bodyBytes, err := io.ReadAll(msg.Body)
 	if err != nil {
-		f.logger.Error("Failed to read message body", zap.Error(err))
-		fmt.Fprintf(conn, "500 Failed to read message body\n")
-		return
+		s.filter.logger.Error("Failed to read message body", zap.Error(err))
+		return err
 	}
 	
 	// Create email object
 	email := &core.Email{
 		Headers: make(map[string][]string),
 		Body:    string(bodyBytes),
+		From:    s.sender,
+		To:      s.recipients,
 	}
 	
 	// Convert headers
 	for key, values := range msg.Header {
 		email.Headers[key] = values
-		
-		// Extract From
-		if strings.EqualFold(key, "From") && len(values) > 0 {
-			addr, err := mail.ParseAddress(values[0])
-			if err == nil && addr != nil {
-				email.From = addr.Address
-			} else {
-				email.From = values[0]
-			}
-		}
-		
-		// Extract To
-		if strings.EqualFold(key, "To") && len(values) > 0 {
-			for _, value := range values {
-				addrs, err := mail.ParseAddressList(value)
-				if err == nil {
-					for _, addr := range addrs {
-						email.To = append(email.To, addr.Address)
-					}
-				} else {
-					email.To = append(email.To, value)
-				}
-			}
-		}
 		
 		// Extract Subject
 		if strings.EqualFold(key, "Subject") && len(values) > 0 {
@@ -193,59 +275,76 @@ func (f *PostfixFilter) handleConnection(conn net.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
-	result, err := f.service.AnalyzeEmail(ctx, email)
+	result, err := s.filter.service.AnalyzeEmail(ctx, email)
 	if err != nil {
-		f.logger.Error("Failed to analyze email", 
+		s.filter.logger.Error("Failed to analyze email",
 			zap.Error(err),
 			zap.String("sender", email.From),
 			zap.String("sender_domain", senderDomain))
-		fmt.Fprintf(conn, "500 Failed to analyze email\n")
-		return
+		return err
 	}
 	
 	// Add headers to the email
 	isSpam := result.IsSpam
 	
 	// Determine action based on spam status
-	if isSpam && f.blockSpam {
+	if isSpam && s.filter.blockSpam {
 		// Reject the email
-		f.logger.Info("Rejecting spam email", 
-			zap.String("from", email.From), 
+		s.filter.logger.Info("Rejecting spam email",
+			zap.String("from", email.From),
 			zap.String("sender_domain", senderDomain),
 			zap.Float64("score", result.Score),
 			zap.String("reason", result.Explanation),
 			zap.String("model", result.ModelUsed))
-		fmt.Fprintf(conn, "550 Rejected as spam (score: %.2f)\n", result.Score)
-		return
+		return fmt.Errorf("550 Rejected as spam (score: %.2f)", result.Score)
 	}
 	
-	// Add headers and accept the email
-	fmt.Fprintf(conn, "220 OK\n")
+	// Prepare the modified email with spam headers
+	var modifiedEmail bytes.Buffer
 	
-	// Add spam headers
-	fmt.Fprintf(conn, "%s: %t\n", f.spamHeader, isSpam)
-	fmt.Fprintf(conn, "%s: %.4f\n", f.scoreHeader, result.Score)
-	fmt.Fprintf(conn, "%s: %s\n", f.reasonHeader, result.Explanation)
+	// Write all original headers
+	for key, values := range msg.Header {
+		for _, value := range values {
+			fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", key, value)
+		}
+	}
+	
+	// Add our spam detection headers
+	fmt.Fprintf(&modifiedEmail, "%s: %t\r\n", s.filter.spamHeader, isSpam)
+	fmt.Fprintf(&modifiedEmail, "%s: %.4f\r\n", s.filter.scoreHeader, result.Score)
+	fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", s.filter.reasonHeader, result.Explanation)
 	
 	// End of headers
-	fmt.Fprintf(conn, "\n")
+	fmt.Fprintf(&modifiedEmail, "\r\n")
 	
 	// Write the original email body
-	fmt.Fprintf(conn, "%s\n", email.Body)
+	fmt.Fprintf(&modifiedEmail, "%s", email.Body)
 	
-	// End of message
-	fmt.Fprintf(conn, ".\n")
+	if s.filter.postfixEnabled {
+		// Send the email back to Postfix on the configured port
+		if err := s.filter.sendToPostfix(s.sender, s.recipients, modifiedEmail.Bytes()); err != nil {
+			s.filter.logger.Error("Failed to send email back to Postfix",
+				zap.Error(err),
+				zap.String("sender", email.From))
+			return err
+		}
+	} else {
+		// This should never happen in practice as we always want to send back to Postfix
+		// But we keep it for completeness
+		s.filter.logger.Warn("Postfix forwarding disabled, this is likely a misconfiguration")
+	}
 	
-	f.logger.Info("Processed email", 
+	s.filter.logger.Info("Processed email",
 		zap.String("from", email.From),
 		zap.String("sender_domain", senderDomain),
 		zap.Bool("is_spam", isSpam),
 		zap.Float64("score", result.Score),
 		zap.String("model", result.ModelUsed))
+	
+	return nil
 }
 
-// ProcessEmail processes an email and returns the filtering result
-// This is mainly used for testing or direct API calls
-func (f *PostfixFilter) ProcessEmail(ctx context.Context, email *core.Email) (*core.SpamAnalysisResult, error) {
-	return f.service.AnalyzeEmail(ctx, email)
+// Logout handles SMTP logout (not needed for our filter)
+func (s *smtpSession) Logout() error {
+	return nil
 }

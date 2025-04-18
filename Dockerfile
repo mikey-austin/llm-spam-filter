@@ -20,13 +20,13 @@ COPY internal/ ./internal/
 RUN CGO_ENABLED=1 GOOS=linux go build -a -o llm-spam-filter ./cmd/llm-spam-filter
 
 # Create final image
-FROM alpine:3.18
+FROM alpine:latest
 
 # Install runtime dependencies
 RUN apk add --no-cache ca-certificates tzdata sqlite
 
 # Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN addgroup -S appgroup -g 2000 && adduser -S appuser -G appgroup -u 2000
 
 # Create directories
 RUN mkdir -p /etc/llm-spam-filter /data && \
