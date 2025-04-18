@@ -64,49 +64,54 @@ func NewSQLiteCache(dbPath string, logger *zap.Logger, cleanupFreq time.Duration
 }
 
 // Get retrieves a cached entry for a sender
-func (c *SQLiteCache) Get(ctx context.Context, senderEmail string) (*core.CacheEntry, error) {
-	var entry core.CacheEntry
+func (c *SQLiteCache) Get(senderEmail string) (*core.SpamAnalysisResult, bool) {
+	var isSpam bool
+	var score float32
 	var lastSeen, expiresAt string
 	
-	err := c.db.QueryRowContext(ctx, `
-		SELECT sender_email, is_spam, score, last_seen, expires_at
+	err := c.db.QueryRow(`
+		SELECT is_spam, score, last_seen, expires_at
 		FROM spam_cache
 		WHERE sender_email = ? AND expires_at > datetime('now')
-	`, senderEmail).Scan(&entry.SenderEmail, &entry.IsSpam, &entry.Score, &lastSeen, &expiresAt)
+	`, senderEmail).Scan(&isSpam, &score, &lastSeen, &expiresAt)
 	
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
+			return nil, false
 		}
-		return nil, fmt.Errorf("failed to query cache: %w", err)
+		c.logger.Error("Failed to query cache", zap.Error(err), zap.String("sender", senderEmail))
+		return nil, false
 	}
 	
-	// Parse timestamps
-	entry.LastSeen, err = time.Parse(time.RFC3339, lastSeen)
+	// Parse timestamp
+	analyzedAt, err := time.Parse(time.RFC3339, lastSeen)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse last_seen timestamp: %w", err)
+		c.logger.Error("Failed to parse last_seen timestamp", zap.Error(err))
+		return nil, false
 	}
 	
-	entry.ExpiresAt, err = time.Parse(time.RFC3339, expiresAt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse expires_at timestamp: %w", err)
+	// Convert to SpamAnalysisResult
+	result := &core.SpamAnalysisResult{
+		IsSpam:     isSpam,
+		Score:      float64(score),
+		AnalyzedAt: analyzedAt,
 	}
 	
-	return &entry, nil
+	return result, true
 }
 
 // Set stores a cache entry
-func (c *SQLiteCache) Set(ctx context.Context, entry *core.CacheEntry) error {
-	_, err := c.db.ExecContext(ctx, `
+func (c *SQLiteCache) Set(key string, result *core.SpamAnalysisResult, ttl time.Duration) {
+	expiresAt := time.Now().Add(ttl)
+	
+	_, err := c.db.Exec(`
 		INSERT OR REPLACE INTO spam_cache (sender_email, is_spam, score, last_seen, expires_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, entry.SenderEmail, entry.IsSpam, entry.Score, entry.LastSeen.Format(time.RFC3339), entry.ExpiresAt.Format(time.RFC3339))
+	`, key, result.IsSpam, float32(result.Score), result.AnalyzedAt.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
 	
 	if err != nil {
-		return fmt.Errorf("failed to insert cache entry: %w", err)
+		c.logger.Error("Failed to insert cache entry", zap.Error(err), zap.String("sender", key))
 	}
-	
-	return nil
 }
 
 // Delete removes a cache entry

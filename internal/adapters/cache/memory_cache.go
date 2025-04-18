@@ -42,30 +42,45 @@ func NewMemoryCache(logger *zap.Logger, cleanupFreq time.Duration) *MemoryCache 
 }
 
 // Get retrieves a cached entry for a sender
-func (c *MemoryCache) Get(ctx context.Context, senderEmail string) (*core.CacheEntry, error) {
+func (c *MemoryCache) Get(senderEmail string) (*core.SpamAnalysisResult, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	
 	entry, ok := c.entries[senderEmail]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, false
 	}
 	
 	// Check if entry has expired
 	if time.Now().After(entry.ExpiresAt) {
-		return nil, ErrExpired
+		return nil, false
 	}
 	
-	return entry, nil
+	// Convert CacheEntry to SpamAnalysisResult
+	result := &core.SpamAnalysisResult{
+		IsSpam:     entry.IsSpam,
+		Score:      float64(entry.Score),
+		AnalyzedAt: entry.LastSeen,
+	}
+	
+	return result, true
 }
 
 // Set stores a cache entry
-func (c *MemoryCache) Set(ctx context.Context, entry *core.CacheEntry) error {
+func (c *MemoryCache) Set(key string, result *core.SpamAnalysisResult, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
-	c.entries[entry.SenderEmail] = entry
-	return nil
+	// Convert SpamAnalysisResult to CacheEntry
+	entry := &core.CacheEntry{
+		SenderEmail: key,
+		IsSpam:      result.IsSpam,
+		Score:       float32(result.Score),
+		LastSeen:    result.AnalyzedAt,
+		ExpiresAt:   time.Now().Add(ttl),
+	}
+	
+	c.entries[key] = entry
 }
 
 // Delete removes a cache entry

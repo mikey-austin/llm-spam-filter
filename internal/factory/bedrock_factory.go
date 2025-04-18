@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/mikey/llm-spam-filter/internal/adapters/bedrock"
 	"github.com/mikey/llm-spam-filter/internal/config"
@@ -29,8 +29,8 @@ func NewBedrockFactory(cfg *config.Config, logger *zap.Logger) *BedrockFactory {
 // CreateLLMClient creates a Bedrock LLM client
 func (f *BedrockFactory) CreateLLMClient() (core.LLMClient, error) {
 	// Initialize AWS client
-	awsCfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithRegion(f.cfg.GetString("bedrock.region")),
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(f.cfg.GetString("bedrock.region")),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS configuration: %w", err)

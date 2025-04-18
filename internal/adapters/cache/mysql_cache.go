@@ -62,40 +62,47 @@ func NewMySQLCache(dsn string, logger *zap.Logger, cleanupFreq time.Duration) (*
 }
 
 // Get retrieves a cached entry for a sender
-func (c *MySQLCache) Get(ctx context.Context, senderEmail string) (*core.CacheEntry, error) {
-	var entry core.CacheEntry
+func (c *MySQLCache) Get(senderEmail string) (*core.SpamAnalysisResult, bool) {
+	var isSpam bool
+	var score float32
 	var lastSeen, expiresAt string
 
-	err := c.db.QueryRowContext(ctx, `
-		SELECT sender_email, is_spam, score, last_seen, expires_at
+	err := c.db.QueryRow(`
+		SELECT is_spam, score, last_seen, expires_at
 		FROM spam_cache
 		WHERE sender_email = ? AND expires_at > NOW()
-	`, senderEmail).Scan(&entry.SenderEmail, &entry.IsSpam, &entry.Score, &lastSeen, &expiresAt)
+	`, senderEmail).Scan(&isSpam, &score, &lastSeen, &expiresAt)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
+			return nil, false
 		}
-		return nil, fmt.Errorf("failed to query cache: %w", err)
+		c.logger.Error("Failed to query cache", zap.Error(err), zap.String("sender", senderEmail))
+		return nil, false
 	}
 
-	// Parse timestamps
-	entry.LastSeen, err = time.Parse("2006-01-02 15:04:05", lastSeen)
+	// Parse timestamp
+	analyzedAt, err := time.Parse("2006-01-02 15:04:05", lastSeen)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse last_seen timestamp: %w", err)
+		c.logger.Error("Failed to parse last_seen timestamp", zap.Error(err))
+		return nil, false
 	}
 
-	entry.ExpiresAt, err = time.Parse("2006-01-02 15:04:05", expiresAt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse expires_at timestamp: %w", err)
+	// Convert to SpamAnalysisResult
+	result := &core.SpamAnalysisResult{
+		IsSpam:     isSpam,
+		Score:      float64(score),
+		AnalyzedAt: analyzedAt,
 	}
 
-	return &entry, nil
+	return result, true
 }
 
 // Set stores a cache entry
-func (c *MySQLCache) Set(ctx context.Context, entry *core.CacheEntry) error {
-	_, err := c.db.ExecContext(ctx, `
+func (c *MySQLCache) Set(key string, result *core.SpamAnalysisResult, ttl time.Duration) {
+	expiresAt := time.Now().Add(ttl)
+	
+	_, err := c.db.Exec(`
 		INSERT INTO spam_cache (sender_email, is_spam, score, last_seen, expires_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
@@ -103,13 +110,11 @@ func (c *MySQLCache) Set(ctx context.Context, entry *core.CacheEntry) error {
 			score = VALUES(score),
 			last_seen = VALUES(last_seen),
 			expires_at = VALUES(expires_at)
-	`, entry.SenderEmail, entry.IsSpam, entry.Score, entry.LastSeen.Format("2006-01-02 15:04:05"), entry.ExpiresAt.Format("2006-01-02 15:04:05"))
+	`, key, result.IsSpam, float32(result.Score), result.AnalyzedAt.Format("2006-01-02 15:04:05"), expiresAt.Format("2006-01-02 15:04:05"))
 
 	if err != nil {
-		return fmt.Errorf("failed to insert cache entry: %w", err)
+		c.logger.Error("Failed to insert cache entry", zap.Error(err), zap.String("sender", key))
 	}
-
-	return nil
 }
 
 // Delete removes a cache entry
