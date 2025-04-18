@@ -1,0 +1,147 @@
+# LLM Spam Filter
+
+A Postfix content filter application that uses Amazon Bedrock to evaluate whether received emails are spam or not.
+
+## Features
+
+- Uses Amazon Bedrock for AI-powered spam detection
+- Implements ports and adapters pattern for flexibility
+- Can run as a standalone filter or as a Milter
+- Caching system to reduce costs by remembering trusted senders
+- Multiple cache backends (Memory, SQLite, MySQL)
+- Domain whitelist to bypass spam checking for trusted domains
+- Configurable body size limit to control LLM costs
+- Docker support for easy deployment
+- Non-blocking by default (adds headers rather than rejecting messages)
+
+## Architecture
+
+The application follows the hexagonal (ports and adapters) architecture:
+
+- **Core Domain**: Contains the business logic for spam detection
+- **Ports**: Define interfaces for the application to interact with external systems
+- **Adapters**: Implement the interfaces defined by ports
+  - Input adapters: Postfix content filter, Milter
+  - Output adapters: Amazon Bedrock client, Memory cache, SQLite cache, MySQL cache
+
+## Setup
+
+### Prerequisites
+
+- Go 1.21+
+- Docker and Docker Compose
+- AWS credentials with Bedrock access
+- Postfix mail server
+
+### Configuration
+
+See `configs/config.yaml` for configuration options. You can override settings using environment variables:
+
+```bash
+export SPAM_FILTER_BEDROCK_MODEL_ID=anthropic.claude-v2
+export SPAM_FILTER_SPAM_THRESHOLD=0.7
+export SPAM_FILTER_SERVER_BLOCK_SPAM=false
+export SPAM_FILTER_BEDROCK_MAX_BODY_SIZE=8192
+```
+
+### Running with Docker
+
+1. Clone the repository:
+```bash
+git clone https://github.com/mikey/llm-spam-filter.git
+cd llm-spam-filter
+```
+
+2. Configure AWS credentials:
+```bash
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export AWS_REGION=us-east-1
+```
+
+3. Start the service:
+```bash
+docker-compose up -d
+```
+
+### Postfix Integration
+
+You can integrate the spam filter with Postfix in two ways:
+
+#### As a Content Filter
+
+1. Run the setup script:
+```bash
+sudo ./scripts/setup-postfix.sh
+```
+
+2. Restart Postfix:
+```bash
+sudo systemctl restart postfix
+```
+
+#### As a Milter
+
+1. Run the setup script:
+```bash
+sudo ./scripts/setup-milter.sh
+```
+
+2. Restart Postfix:
+```bash
+sudo systemctl restart postfix
+```
+
+## How It Works
+
+1. Postfix receives an email and passes it to the filter
+2. The filter extracts the email content and metadata
+3. The filter checks if the sender's domain is in the whitelist
+   - If whitelisted, the email is marked as non-spam and returned immediately
+4. If not whitelisted, the filter checks if the sender is in the cache
+5. If not cached, it truncates the email body if it exceeds the configured size limit
+6. It sends the email to Amazon Bedrock for analysis
+7. Based on the analysis result, it adds headers to the email
+8. The email is returned to Postfix for delivery
+9. The sender is cached to save costs on future emails
+
+## Cache Configuration
+
+You can choose between three cache backends:
+
+- **Memory**: Fast but not persistent across restarts
+- **SQLite**: Persistent storage, suitable for small to medium deployments
+- **MySQL**: Scalable persistent storage, suitable for larger deployments
+
+Configure the cache in `configs/config.yaml`:
+
+```yaml
+cache:
+  type: "sqlite"  # or "memory" or "mysql"
+  enabled: true
+  ttl: "24h"
+  sqlite_path: "/data/spam_cache.db"
+  mysql_dsn: "user:password@tcp(localhost:3306)/spam_filter"
+```
+
+## Whitelist Configuration
+
+You can configure domains to bypass spam checking:
+
+```yaml
+spam:
+  threshold: 0.7
+  whitelisted_domains:
+    - "example.com"
+    - "trusted-company.org"
+    - "internal-domain.net"
+```
+
+## Body Size Limit
+
+To control costs and improve performance, you can limit the size of email bodies sent to the LLM:
+
+```yaml
+bedrock:
+  max_body_size: 4096  # Maximum body size in bytes (0 for no limit)
+```

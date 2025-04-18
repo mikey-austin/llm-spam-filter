@@ -1,0 +1,16 @@
+# Add these lines to your Postfix master.cf configuration
+
+# Define the content filter service
+scan    unix  -       -       n       -       10      smtp
+    -o smtp_send_xforward_command=yes
+
+# Define the content filter transport
+llm-spam-filter:10025 inet n  -       n       -       10      smtpd
+    -o content_filter=
+    -o receive_override_options=no_unknown_recipient_checks,no_header_body_checks,no_milters
+    -o smtpd_helo_restrictions=
+    -o smtpd_client_restrictions=
+    -o smtpd_sender_restrictions=
+    -o smtpd_recipient_restrictions=permit_mynetworks,reject
+    -o mynetworks=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+    -o smtpd_authorized_xforward_hosts=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
