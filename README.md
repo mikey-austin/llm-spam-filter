@@ -1,10 +1,12 @@
 # LLM Spam Filter
 
-A Postfix content filter application that uses Amazon Bedrock to evaluate whether received emails are spam or not.
+A Postfix content filter application that uses AI models to evaluate whether received emails are spam or not.
 
 ## Features
 
-- Uses Amazon Bedrock for AI-powered spam detection
+- AI-powered spam detection with multiple provider options:
+  - Amazon Bedrock
+  - Google Gemini
 - Implements ports and adapters pattern for flexibility
 - Can run as a standalone filter or as a Milter
 - Caching system to reduce costs by remembering trusted senders
@@ -22,7 +24,7 @@ The application follows the hexagonal (ports and adapters) architecture:
 - **Ports**: Define interfaces for the application to interact with external systems
 - **Adapters**: Implement the interfaces defined by ports
   - Input adapters: Postfix content filter, Milter
-  - Output adapters: Amazon Bedrock client, Memory cache, SQLite cache, MySQL cache
+  - Output adapters: Amazon Bedrock client, Google Gemini client, Memory cache, SQLite cache, MySQL cache
 
 ## Setup
 
@@ -30,7 +32,8 @@ The application follows the hexagonal (ports and adapters) architecture:
 
 - Go 1.21+
 - Docker and Docker Compose
-- AWS credentials with Bedrock access
+- AWS credentials with Bedrock access (if using Amazon Bedrock)
+- Google API key with Gemini access (if using Google Gemini)
 - Postfix mail server
 
 ### Configuration
@@ -38,10 +41,20 @@ The application follows the hexagonal (ports and adapters) architecture:
 See `configs/config.yaml` for configuration options. You can override settings using environment variables:
 
 ```bash
+# For Amazon Bedrock
+export SPAM_FILTER_LLM_PROVIDER=bedrock
 export SPAM_FILTER_BEDROCK_MODEL_ID=anthropic.claude-v2
+export SPAM_FILTER_BEDROCK_MAX_BODY_SIZE=8192
+
+# For Google Gemini
+export SPAM_FILTER_LLM_PROVIDER=gemini
+export SPAM_FILTER_GEMINI_API_KEY=your_api_key
+export SPAM_FILTER_GEMINI_MODEL_NAME=gemini-pro
+export SPAM_FILTER_GEMINI_MAX_BODY_SIZE=8192
+
+# General settings
 export SPAM_FILTER_SPAM_THRESHOLD=0.7
 export SPAM_FILTER_SERVER_BLOCK_SPAM=false
-export SPAM_FILTER_BEDROCK_MAX_BODY_SIZE=8192
 ```
 
 ### Running with Docker
@@ -52,11 +65,18 @@ git clone https://github.com/mikey/llm-spam-filter.git
 cd llm-spam-filter
 ```
 
-2. Configure AWS credentials:
+2. Configure credentials based on your chosen LLM provider:
+
+For Amazon Bedrock:
 ```bash
 export AWS_ACCESS_KEY_ID=your_access_key
 export AWS_SECRET_ACCESS_KEY=your_secret_key
 export AWS_REGION=us-east-1
+```
+
+For Google Gemini:
+```bash
+export SPAM_FILTER_GEMINI_API_KEY=your_gemini_api_key
 ```
 
 3. Start the service:
@@ -100,7 +120,7 @@ sudo systemctl restart postfix
    - If whitelisted, the email is marked as non-spam and returned immediately
 4. If not whitelisted, the filter checks if the sender is in the cache
 5. If not cached, it truncates the email body if it exceeds the configured size limit
-6. It sends the email to Amazon Bedrock for analysis
+6. It sends the email to the configured LLM provider (Amazon Bedrock or Google Gemini) for analysis
 7. Based on the analysis result, it adds headers to the email
 8. The email is returned to Postfix for delivery
 9. The sender is cached to save costs on future emails
@@ -142,6 +162,44 @@ spam:
 To control costs and improve performance, you can limit the size of email bodies sent to the LLM:
 
 ```yaml
+# For Amazon Bedrock
 bedrock:
   max_body_size: 4096  # Maximum body size in bytes (0 for no limit)
+
+# For Google Gemini
+gemini:
+  max_body_size: 4096  # Maximum body size in bytes (0 for no limit)
+```
+## LLM Provider Configuration
+
+You can choose between different LLM providers for spam detection:
+
+### Amazon Bedrock
+
+```yaml
+llm:
+  provider: "bedrock"
+
+bedrock:
+  region: "us-east-1"
+  model_id: "anthropic.claude-v2"
+  max_tokens: 1000
+  temperature: 0.1
+  top_p: 0.9
+  max_body_size: 4096
+```
+
+### Google Gemini
+
+```yaml
+llm:
+  provider: "gemini"
+
+gemini:
+  api_key: "your-gemini-api-key"
+  model_name: "gemini-pro"
+  max_tokens: 1000
+  temperature: 0.1
+  top_p: 0.9
+  max_body_size: 4096
 ```

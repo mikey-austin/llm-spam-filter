@@ -12,14 +12,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/google/generative-ai-go/genai"
 	"github.com/mikey/llm-spam-filter/internal/adapters/bedrock"
 	"github.com/mikey/llm-spam-filter/internal/adapters/cache"
 	"github.com/mikey/llm-spam-filter/internal/adapters/filter"
+	"github.com/mikey/llm-spam-filter/internal/adapters/gemini"
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"github.com/mikey/llm-spam-filter/internal/ports"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/api/option"
 )
 
 func main() {
@@ -37,25 +40,51 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync()
-	// Initialize AWS client                                                        16:08:39 [382/1876]
-	awsCfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithRegion(cfg.GetString("bedrock.region")),
-	)
-	if err != nil {
-		logger.Fatal("Failed to load AWS configuration", zap.Error(err))
-	}
 
-	// Initialize Bedrock client
-	bedrockClient := bedrockruntime.NewFromConfig(awsCfg)
-	llmClient := bedrock.NewBedrockClient(
-		bedrockClient,
-		cfg.GetString("bedrock.model_id"),
-		cfg.GetInt("bedrock.max_tokens"),
-		float32(cfg.GetFloat64("bedrock.temperature")),
-		float32(cfg.GetFloat64("bedrock.top_p")),
-		cfg.GetInt("bedrock.max_body_size"),
-		logger,
-	)
+	// Initialize LLM client based on provider
+	var llmClient ports.LLMClient
+	
+	switch cfg.GetString("llm.provider") {
+	case "bedrock":
+		// Initialize AWS client
+		awsCfg, err := config.LoadDefaultConfig(context.Background(),
+			config.WithRegion(cfg.GetString("bedrock.region")),
+		)
+		if err != nil {
+			logger.Fatal("Failed to load AWS configuration", zap.Error(err))
+		}
+
+		// Initialize Bedrock client
+		bedrockClient := bedrockruntime.NewFromConfig(awsCfg)
+		llmClient = bedrock.NewBedrockClient(
+			bedrockClient,
+			cfg.GetString("bedrock.model_id"),
+			cfg.GetInt("bedrock.max_tokens"),
+			float32(cfg.GetFloat64("bedrock.temperature")),
+			float32(cfg.GetFloat64("bedrock.top_p")),
+			cfg.GetInt("bedrock.max_body_size"),
+			logger,
+		)
+		
+	case "gemini":
+		// Initialize Gemini client
+		geminiClient, err := gemini.NewGeminiClient(
+			cfg.GetString("gemini.api_key"),
+			cfg.GetString("gemini.model_name"),
+			cfg.GetInt("gemini.max_tokens"),
+			float32(cfg.GetFloat64("gemini.temperature")),
+			float32(cfg.GetFloat64("gemini.top_p")),
+			cfg.GetInt("gemini.max_body_size"),
+			logger,
+		)
+		if err != nil {
+			logger.Fatal("Failed to initialize Gemini client", zap.Error(err))
+		}
+		llmClient = geminiClient
+		
+	default:
+		logger.Fatal("Invalid LLM provider", zap.String("provider", cfg.GetString("llm.provider")))
+	}
 
 	// Initialize cache
 	var cacheRepo core.CacheRepository
@@ -152,6 +181,13 @@ func main() {
 		logger.Error("Failed to stop filter", zap.Error(err))
 	}
 
+	// Close the Gemini client if needed
+	if geminiClient, ok := llmClient.(*gemini.GeminiClient); ok {
+		if err := geminiClient.Close(); err != nil {
+			logger.Error("Failed to close Gemini client", zap.Error(err))
+		}
+	}
+
 	// Stop the cache if needed
 	if memCache, ok := cacheRepo.(*cache.MemoryCache); ok {
 		memCache.Stop()
@@ -174,18 +210,30 @@ func loadConfig() (*viper.Viper, error) {
 	v.AddConfigPath(".")
 
 	// Set defaults
+	v.SetDefault("llm.provider", "bedrock")
 	v.SetDefault("server.filter_type", "postfix")
 	v.SetDefault("server.listen_address", "0.0.0.0:10025")
 	v.SetDefault("server.block_spam", false)
 	v.SetDefault("server.headers.spam", "X-Spam-Status")
 	v.SetDefault("server.headers.score", "X-Spam-Score")
 	v.SetDefault("server.headers.reason", "X-Spam-Reason")
+	
+	// Bedrock defaults
 	v.SetDefault("bedrock.region", "us-east-1")
 	v.SetDefault("bedrock.model_id", "anthropic.claude-v2")
 	v.SetDefault("bedrock.max_tokens", 1000)
 	v.SetDefault("bedrock.temperature", 0.1)
 	v.SetDefault("bedrock.top_p", 0.9)
 	v.SetDefault("bedrock.max_body_size", 4096)
+	
+	// Gemini defaults
+	v.SetDefault("gemini.api_key", "")
+	v.SetDefault("gemini.model_name", "gemini-pro")
+	v.SetDefault("gemini.max_tokens", 1000)
+	v.SetDefault("gemini.temperature", 0.1)
+	v.SetDefault("gemini.top_p", 0.9)
+	v.SetDefault("gemini.max_body_size", 4096)
+	
 	v.SetDefault("spam.threshold", 0.7)
 	v.SetDefault("spam.whitelisted_domains", []string{})
 	v.SetDefault("cache.type", "memory")
