@@ -69,6 +69,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.postfix.enabled", true)
 	v.SetDefault("server.postfix.address", "127.0.0.1")
 	v.SetDefault("server.postfix.port", 10026)
+	v.SetDefault("server.modify_subject", true)
+	v.SetDefault("server.subject_prefix", "[**SPAM**] ")
 	
 	// Bedrock defaults
 	v.SetDefault("bedrock.region", "us-east-1")

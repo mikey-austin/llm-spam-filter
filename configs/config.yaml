@@ -1,11 +1,11 @@
 server:
-  filter_type: "postfix"
-  listen_address: "0.0.0.0:10025"
+  listen_addr: "127.0.0.1:10025"
   block_spam: false
-  headers:
-    spam: "X-Spam-Status"
-    score: "X-Spam-Score"
-    reason: "X-Spam-Reason"
+  spam_header: "X-Spam"
+  score_header: "X-Spam-Score"
+  reason_header: "X-Spam-Reason"
+  modify_subject: true
+  subject_prefix: "[**SPAM**] "
   postfix:
     enabled: true
     address: "127.0.0.1"
@@ -43,15 +43,11 @@ spam:
   whitelisted_domains:
     - "example.com"
     - "trusted-company.org"
+    - "internal-domain.net"
 
 cache:
   type: "memory"  # Options: "memory", "sqlite", "mysql"
   enabled: true
   ttl: "24h"
-  cleanup_frequency: "1h"
   sqlite_path: "/data/spam_cache.db"
   mysql_dsn: "user:password@tcp(localhost:3306)/spam_filter"
-
-logging:
-  level: "info"
-  format: "json"

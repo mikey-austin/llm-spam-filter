@@ -1,8 +1,8 @@
 module github.com/mikey/llm-spam-filter
 
-go 1.22
+go 1.23.0
 
-toolchain go1.22.2
+toolchain go1.23.8
 
 require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
@@ -19,6 +19,7 @@ require (
 	github.com/google/generative-ai-go v0.19.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/sashabaranov/go-openai v1.38.2
+	golang.org/x/text v0.24.0
 	google.golang.org/api v0.186.0
 )
 
@@ -74,9 +75,8 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
-	golang.org/x/sync v0.7.0 // indirect
+	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240617180043-68d350f18fd4 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240617180043-68d350f18fd4 // indirect

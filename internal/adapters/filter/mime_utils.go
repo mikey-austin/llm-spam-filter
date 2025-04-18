@@ -9,6 +9,11 @@ import (
 	"mime/quotedprintable"
 	"net/mail"
 	"strings"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/htmlindex"
+	"golang.org/x/text/encoding/ianaindex"
 )
 
 // extractTextFromMessage extracts the text content from an email message
@@ -186,4 +191,56 @@ func decodeContent(content []byte, encoding string) ([]byte, error) {
 		// For other encodings or no encoding, return the content as is
 		return content, nil
 	}
+}
+
+// decodeEncodedHeader decodes MIME encoded-word syntax in headers
+// as per RFC 2047, e.g. "=?UTF-8?B?U3ViamVjdA==?="
+func decodeEncodedHeader(header string) (string, error) {
+	// Use the standard library's WordDecoder to decode the header
+	dec := new(mime.WordDecoder)
+	
+	// Set a custom charset decoder function to handle non-UTF-8 charsets
+	dec.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		enc, err := getEncoding(charset)
+		if err != nil {
+			// If we can't find the encoding, just return the input
+			return input, nil
+		}
+		return enc.NewDecoder().Reader(input), nil
+	}
+	
+	// Decode the header
+	decoded, err := dec.DecodeHeader(header)
+	if err != nil {
+		// If decoding fails, return the original header
+		return header, err
+	}
+	
+	return decoded, nil
+}
+
+// getEncoding returns the encoding for a given charset
+func getEncoding(charset string) (encoding.Encoding, error) {
+	// Try IANA index first
+	if enc, err := ianaindex.IANA.Encoding(charset); err == nil && enc != nil {
+		return enc, nil
+	}
+	
+	// Try HTML index
+	if enc, err := htmlindex.Get(charset); err == nil {
+		return enc, nil
+	}
+	
+	// Try some common charsets directly
+	switch strings.ToLower(charset) {
+	case "windows-1252", "cp1252":
+		return charmap.Windows1252, nil
+	case "iso-8859-1", "latin1":
+		return charmap.ISO8859_1, nil
+	case "iso-8859-15", "latin9":
+		return charmap.ISO8859_15, nil
+	}
+	
+	// Default to Windows-1252 as a fallback
+	return charmap.Windows1252, nil
 }

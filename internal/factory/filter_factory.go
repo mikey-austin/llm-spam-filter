@@ -42,6 +42,8 @@ func (f *FilterFactory) CreateEmailFilter() (ports.EmailFilter, error) {
 			f.cfg.GetString("server.postfix.address"),
 			f.cfg.GetInt("server.postfix.port"),
 			f.cfg.GetBool("server.postfix.enabled"),
+			f.cfg.GetString("server.subject_prefix"),
+			f.cfg.GetBool("server.modify_subject"),
 		), nil
 	}
 	

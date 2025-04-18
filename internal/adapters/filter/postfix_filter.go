@@ -18,17 +18,19 @@ import (
 
 // PostfixFilter implements a Postfix content filter
 type PostfixFilter struct {
-	service        *core.SpamFilterService
-	logger         *zap.Logger
-	listenAddr     string
-	server         *smtp.Server
-	blockSpam      bool
-	spamHeader     string
-	scoreHeader    string
-	reasonHeader   string
-	postfixAddr    string
-	postfixPort    int
-	postfixEnabled bool
+	service           *core.SpamFilterService
+	logger            *zap.Logger
+	listenAddr        string
+	server            *smtp.Server
+	blockSpam         bool
+	spamHeader        string
+	scoreHeader       string
+	reasonHeader      string
+	postfixAddr       string
+	postfixPort       int
+	postfixEnabled    bool
+	subjectPrefix     string
+	modifySubject     bool
 }
 
 // NewPostfixFilter creates a new Postfix content filter
@@ -43,7 +45,14 @@ func NewPostfixFilter(
 	postfixAddr string,
 	postfixPort int,
 	postfixEnabled bool,
+	subjectPrefix string,
+	modifySubject bool,
 ) *PostfixFilter {
+	// If subject prefix is not set but modify subject is enabled, use default prefix
+	if subjectPrefix == "" && modifySubject {
+		subjectPrefix = "[**SPAM**] "
+	}
+	
 	return &PostfixFilter{
 		service:        service,
 		logger:         logger,
@@ -55,6 +64,8 @@ func NewPostfixFilter(
 		postfixAddr:    postfixAddr,
 		postfixPort:    postfixPort,
 		postfixEnabled: postfixEnabled,
+		subjectPrefix:  subjectPrefix,
+		modifySubject:  modifySubject,
 	}
 }
 
@@ -311,10 +322,47 @@ func (s *smtpSession) Data(r io.Reader) error {
 	fmt.Fprintf(&modifiedEmail, "%s: %.4f\r\n", s.filter.scoreHeader, result.Score)
 	fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", s.filter.reasonHeader, result.Explanation)
 	
-	// Write all original headers
-	for key, values := range msg.Header {
-		for _, value := range values {
-			fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", key, value)
+	// Modify the subject if it's spam and subject modification is enabled
+	if isSpam && s.filter.modifySubject && s.filter.subjectPrefix != "" {
+		// Get the original subject
+		originalSubject := msg.Header.Get("Subject")
+		
+		// Decode the subject if it's encoded
+		decodedSubject, err := decodeEncodedHeader(originalSubject)
+		if err != nil {
+			// If decoding fails, use the original subject
+			decodedSubject = originalSubject
+		}
+		
+		// Prepend the spam prefix if it's not already there
+		if !strings.HasPrefix(decodedSubject, s.filter.subjectPrefix) {
+			newSubject := s.filter.subjectPrefix + decodedSubject
+			
+			// Write the modified subject header
+			fmt.Fprintf(&modifiedEmail, "Subject: %s\r\n", newSubject)
+			
+			// Skip the original subject when writing other headers
+			for key, values := range msg.Header {
+				if !strings.EqualFold(key, "Subject") {
+					for _, value := range values {
+						fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", key, value)
+					}
+				}
+			}
+		} else {
+			// Subject already has the prefix, write all headers as is
+			for key, values := range msg.Header {
+				for _, value := range values {
+					fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", key, value)
+				}
+			}
+		}
+	} else {
+		// No subject modification needed, write all headers as is
+		for key, values := range msg.Header {
+			for _, value := range values {
+				fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", key, value)
+			}
 		}
 	}
 	
