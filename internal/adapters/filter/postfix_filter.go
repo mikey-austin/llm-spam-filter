@@ -226,31 +226,35 @@ func (s *smtpSession) Rcpt(to string, _ *smtp.RcptOptions) error {
 
 // Data handles the email data
 func (s *smtpSession) Data(r io.Reader) error {
-	// Read the message data
-	data, err := io.ReadAll(r)
+	// Read the complete raw message data
+	rawData, err := io.ReadAll(r)
 	if err != nil {
 		s.filter.logger.Error("Failed to read message data", zap.Error(err))
 		return err
 	}
 	
+	// Keep a copy of the raw data for later reconstruction
+	rawDataCopy := make([]byte, len(rawData))
+	copy(rawDataCopy, rawData)
+	
 	// Parse the email message
-	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	msg, err := mail.ReadMessage(bytes.NewReader(rawData))
 	if err != nil {
 		s.filter.logger.Error("Failed to parse email message", zap.Error(err))
 		return err
 	}
 	
-	// Read the message body
-	bodyBytes, err := io.ReadAll(msg.Body)
+	// Extract the text content for analysis
+	textContent, err := extractTextFromMessage(msg)
 	if err != nil {
-		s.filter.logger.Error("Failed to read message body", zap.Error(err))
+		s.filter.logger.Error("Failed to extract text content", zap.Error(err))
 		return err
 	}
 	
-	// Create email object
+	// Create email object for analysis
 	email := &core.Email{
 		Headers: make(map[string][]string),
-		Body:    string(bodyBytes),
+		Body:    textContent,
 		From:    s.sender,
 		To:      s.recipients,
 	}
@@ -302,6 +306,11 @@ func (s *smtpSession) Data(r io.Reader) error {
 	// Prepare the modified email with spam headers
 	var modifiedEmail bytes.Buffer
 	
+	// Add our spam detection headers first
+	fmt.Fprintf(&modifiedEmail, "%s: %t\r\n", s.filter.spamHeader, isSpam)
+	fmt.Fprintf(&modifiedEmail, "%s: %.4f\r\n", s.filter.scoreHeader, result.Score)
+	fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", s.filter.reasonHeader, result.Explanation)
+	
 	// Write all original headers
 	for key, values := range msg.Header {
 		for _, value := range values {
@@ -309,16 +318,29 @@ func (s *smtpSession) Data(r io.Reader) error {
 		}
 	}
 	
-	// Add our spam detection headers
-	fmt.Fprintf(&modifiedEmail, "%s: %t\r\n", s.filter.spamHeader, isSpam)
-	fmt.Fprintf(&modifiedEmail, "%s: %.4f\r\n", s.filter.scoreHeader, result.Score)
-	fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", s.filter.reasonHeader, result.Explanation)
-	
 	// End of headers
 	fmt.Fprintf(&modifiedEmail, "\r\n")
 	
-	// Write the original email body
-	fmt.Fprintf(&modifiedEmail, "%s", email.Body)
+	// Find where the original body starts in the raw data
+	bodyStartIndex := bytes.Index(rawDataCopy, []byte("\r\n\r\n"))
+	if bodyStartIndex == -1 {
+		bodyStartIndex = bytes.Index(rawDataCopy, []byte("\n\n"))
+		if bodyStartIndex == -1 {
+			// Fallback: if we can't find the body separator, just use the original message body
+			bodyBytes, err := io.ReadAll(msg.Body)
+			if err != nil {
+				s.filter.logger.Error("Failed to read message body", zap.Error(err))
+				return err
+			}
+			modifiedEmail.Write(bodyBytes)
+		} else {
+			// Write the original body (preserving all MIME parts and attachments)
+			modifiedEmail.Write(rawDataCopy[bodyStartIndex+2:])
+		}
+	} else {
+		// Write the original body (preserving all MIME parts and attachments)
+		modifiedEmail.Write(rawDataCopy[bodyStartIndex+4:])
+	}
 	
 	if s.filter.postfixEnabled {
 		// Send the email back to Postfix on the configured port
