@@ -204,7 +204,7 @@ func (f *PostfixFilter) handleConnection(conn net.Conn) {
 	}
 	
 	// Add headers to the email
-	isSpam := f.service.IsSpam(result)
+	isSpam := result.IsSpam
 	
 	// Determine action based on spam status
 	if isSpam && f.blockSpam {

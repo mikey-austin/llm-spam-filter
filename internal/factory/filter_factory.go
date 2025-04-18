@@ -30,8 +30,7 @@ func NewFilterFactory(cfg *config.Config, logger *zap.Logger, spamService *core.
 func (f *FilterFactory) CreateEmailFilter() (ports.EmailFilter, error) {
 	filterType := f.cfg.GetString("server.filter_type")
 	
-	switch filterType {
-	case "postfix":
+	if filterType == "postfix" {
 		return filter.NewPostfixFilter(
 			f.spamService,
 			f.logger,
@@ -41,17 +40,7 @@ func (f *FilterFactory) CreateEmailFilter() (ports.EmailFilter, error) {
 			f.cfg.GetString("server.headers.score"),
 			f.cfg.GetString("server.headers.reason"),
 		), nil
-	case "milter":
-		return filter.NewMilterFilter(
-			f.spamService,
-			f.logger,
-			f.cfg.GetString("server.listen_address"),
-			f.cfg.GetBool("server.block_spam"),
-			f.cfg.GetString("server.headers.spam"),
-			f.cfg.GetString("server.headers.score"),
-			f.cfg.GetString("server.headers.reason"),
-		), nil
-	default:
-		return nil, fmt.Errorf("unsupported filter type: %s", filterType)
 	}
+	
+	return nil, fmt.Errorf("unsupported filter type: %s", filterType)
 }

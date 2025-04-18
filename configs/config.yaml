@@ -2,7 +2,7 @@
 
 # Server configuration
 server:
-  # Filter type: "postfix" or "milter"
+  # Filter type: "postfix"
   filter_type: "postfix"
   # Listen address for the filter
   listen_address: "0.0.0.0:10025"

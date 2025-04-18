@@ -9,7 +9,7 @@ A Postfix content filter application that uses AI models to evaluate whether rec
   - Google Gemini
   - OpenAI
 - Implements ports and adapters pattern for flexibility
-- Can run as a standalone filter or as a Milter
+- Can run as a standalone Postfix content filter
 - Caching system to reduce costs by remembering trusted senders
 - Multiple cache backends (Memory, SQLite, MySQL)
 - Domain whitelist to bypass spam checking for trusted domains
@@ -25,7 +25,7 @@ The application follows the hexagonal (ports and adapters) architecture:
 - **Core Domain**: Contains the business logic for spam detection
 - **Ports**: Define interfaces for the application to interact with external systems
 - **Adapters**: Implement the interfaces defined by ports
-  - Input adapters: Postfix content filter, Milter
+  - Input adapters: Postfix content filter
   - Output adapters: Amazon Bedrock client, Google Gemini client, OpenAI client, Memory cache, SQLite cache, MySQL cache
 
 ## Setup
@@ -100,25 +100,9 @@ docker-compose up -d
 
 ### Postfix Integration
 
-You can integrate the spam filter with Postfix in two ways:
-
-#### As a Content Filter
-
 1. Run the setup script:
 ```bash
 sudo ./scripts/setup-postfix.sh
-```
-
-2. Restart Postfix:
-```bash
-sudo systemctl restart postfix
-```
-
-#### As a Milter
-
-1. Run the setup script:
-```bash
-sudo ./scripts/setup-milter.sh
 ```
 
 2. Restart Postfix:

@@ -23,3 +23,11 @@ type SpamAnalysisResult struct {
 	ModelUsed    string
 	ProcessingID string
 }
+
+type CacheEntry struct {
+	SenderEmail string
+	IsSpam      bool
+	Score       float32
+	LastSeen    time.Time
+	ExpiresAt   time.Time
+}

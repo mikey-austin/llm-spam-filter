@@ -8,7 +8,6 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.25.3
 	github.com/aws/aws-sdk-go-v2/config v1.27.7
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.7.2
-	github.com/emersion/go-milter v0.3.3
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/google/generative-ai-go v0.19.0
 	github.com/mattn/go-sqlite3 v1.14.22
@@ -38,7 +37,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.23.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.28.4 // indirect
 	github.com/aws/smithy-go v1.20.1 // indirect
-	github.com/emersion/go-message v0.11.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
