@@ -16,7 +16,7 @@ server:
 
 # LLM provider configuration
 llm:
-  # Provider type: "bedrock" or "gemini"
+  # Provider type: "bedrock", "gemini", or "openai"
   provider: "bedrock"
 
 # Amazon Bedrock configuration (used when provider is "bedrock")
@@ -40,6 +40,21 @@ gemini:
   api_key: "your-gemini-api-key"
   # Model name to use
   model_name: "gemini-pro"
+  # Maximum tokens to generate
+  max_tokens: 1000
+  # Temperature for generation (0.0 to 1.0)
+  temperature: 0.1
+  # Top-p for generation (0.0 to 1.0)
+  top_p: 0.9
+  # Maximum body size in bytes to send to the LLM (0 for no limit)
+  max_body_size: 4096
+
+# OpenAI configuration (used when provider is "openai")
+openai:
+  # API key for OpenAI
+  api_key: "your-openai-api-key"
+  # Model name to use
+  model_name: "gpt-4"
   # Maximum tokens to generate
   max_tokens: 1000
   # Temperature for generation (0.0 to 1.0)

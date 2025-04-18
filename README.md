@@ -7,6 +7,7 @@ A Postfix content filter application that uses AI models to evaluate whether rec
 - AI-powered spam detection with multiple provider options:
   - Amazon Bedrock
   - Google Gemini
+  - OpenAI
 - Implements ports and adapters pattern for flexibility
 - Can run as a standalone filter or as a Milter
 - Caching system to reduce costs by remembering trusted senders
@@ -24,7 +25,7 @@ The application follows the hexagonal (ports and adapters) architecture:
 - **Ports**: Define interfaces for the application to interact with external systems
 - **Adapters**: Implement the interfaces defined by ports
   - Input adapters: Postfix content filter, Milter
-  - Output adapters: Amazon Bedrock client, Google Gemini client, Memory cache, SQLite cache, MySQL cache
+  - Output adapters: Amazon Bedrock client, Google Gemini client, OpenAI client, Memory cache, SQLite cache, MySQL cache
 
 ## Setup
 
@@ -34,6 +35,7 @@ The application follows the hexagonal (ports and adapters) architecture:
 - Docker and Docker Compose
 - AWS credentials with Bedrock access (if using Amazon Bedrock)
 - Google API key with Gemini access (if using Google Gemini)
+- OpenAI API key (if using OpenAI)
 - Postfix mail server
 
 ### Configuration
@@ -51,6 +53,12 @@ export SPAM_FILTER_LLM_PROVIDER=gemini
 export SPAM_FILTER_GEMINI_API_KEY=your_api_key
 export SPAM_FILTER_GEMINI_MODEL_NAME=gemini-pro
 export SPAM_FILTER_GEMINI_MAX_BODY_SIZE=8192
+
+# For OpenAI
+export SPAM_FILTER_LLM_PROVIDER=openai
+export SPAM_FILTER_OPENAI_API_KEY=your_api_key
+export SPAM_FILTER_OPENAI_MODEL_NAME=gpt-4
+export SPAM_FILTER_OPENAI_MAX_BODY_SIZE=8192
 
 # General settings
 export SPAM_FILTER_SPAM_THRESHOLD=0.7
@@ -77,6 +85,11 @@ export AWS_REGION=us-east-1
 For Google Gemini:
 ```bash
 export SPAM_FILTER_GEMINI_API_KEY=your_gemini_api_key
+```
+
+For OpenAI:
+```bash
+export SPAM_FILTER_OPENAI_API_KEY=your_openai_api_key
 ```
 
 3. Start the service:
@@ -169,6 +182,10 @@ bedrock:
 # For Google Gemini
 gemini:
   max_body_size: 4096  # Maximum body size in bytes (0 for no limit)
+
+# For OpenAI
+openai:
+  max_body_size: 4096  # Maximum body size in bytes (0 for no limit)
 ```
 ## LLM Provider Configuration
 
@@ -198,6 +215,21 @@ llm:
 gemini:
   api_key: "your-gemini-api-key"
   model_name: "gemini-pro"
+  max_tokens: 1000
+  temperature: 0.1
+  top_p: 0.9
+  max_body_size: 4096
+```
+
+### OpenAI
+
+```yaml
+llm:
+  provider: "openai"
+
+openai:
+  api_key: "your-openai-api-key"
+  model_name: "gpt-4"
   max_tokens: 1000
   temperature: 0.1
   top_p: 0.9

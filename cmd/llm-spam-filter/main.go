@@ -17,6 +17,7 @@ import (
 	"github.com/mikey/llm-spam-filter/internal/adapters/cache"
 	"github.com/mikey/llm-spam-filter/internal/adapters/filter"
 	"github.com/mikey/llm-spam-filter/internal/adapters/gemini"
+	"github.com/mikey/llm-spam-filter/internal/adapters/openai"
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"github.com/mikey/llm-spam-filter/internal/ports"
 	"github.com/spf13/viper"
@@ -81,6 +82,22 @@ func main() {
 			logger.Fatal("Failed to initialize Gemini client", zap.Error(err))
 		}
 		llmClient = geminiClient
+		
+	case "openai":
+		// Initialize OpenAI client
+		factory := openai.NewFactory(
+			cfg.GetString("openai.api_key"),
+			cfg.GetString("openai.model_name"),
+			cfg.GetInt("openai.max_tokens"),
+			float32(cfg.GetFloat64("openai.temperature")),
+			float32(cfg.GetFloat64("openai.top_p")),
+			cfg.GetInt("openai.max_body_size"),
+			logger,
+		)
+		llmClient, err = factory.CreateLLMClient()
+		if err != nil {
+			logger.Fatal("Failed to initialize OpenAI client", zap.Error(err))
+		}
 		
 	default:
 		logger.Fatal("Invalid LLM provider", zap.String("provider", cfg.GetString("llm.provider")))
@@ -233,6 +250,14 @@ func loadConfig() (*viper.Viper, error) {
 	v.SetDefault("gemini.temperature", 0.1)
 	v.SetDefault("gemini.top_p", 0.9)
 	v.SetDefault("gemini.max_body_size", 4096)
+	
+	// OpenAI defaults
+	v.SetDefault("openai.api_key", "")
+	v.SetDefault("openai.model_name", "gpt-4")
+	v.SetDefault("openai.max_tokens", 1000)
+	v.SetDefault("openai.temperature", 0.1)
+	v.SetDefault("openai.top_p", 0.9)
+	v.SetDefault("openai.max_body_size", 4096)
 	
 	v.SetDefault("spam.threshold", 0.7)
 	v.SetDefault("spam.whitelisted_domains", []string{})
