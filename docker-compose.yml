@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  llm-spam-filter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-spam-filter
+    restart: unless-stopped
+    ports:
+      - "10025:10025"
+    volumes:
+      - ./configs/config.yaml:/etc/llm-spam-filter/config.yaml
+      - ./data:/data
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Override config settings with environment variables if needed
+      - SPAM_FILTER_BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-anthropic.claude-v2}
+      - SPAM_FILTER_SPAM_THRESHOLD=${SPAM_THRESHOLD:-0.7}
+      - SPAM_FILTER_SERVER_BLOCK_SPAM=${BLOCK_SPAM:-false}
+    networks:
+      - mail-network
+
+networks:
+  mail-network:
+    name: mail-network

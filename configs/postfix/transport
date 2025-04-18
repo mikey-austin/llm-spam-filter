@@ -1,0 +1,5 @@
+# Transport map for Postfix
+# Format: domain transport:nexthop
+
+# This entry ensures that mail processed by the content filter is delivered locally
+llm-spam-filter smtp:[127.0.0.1]:10026

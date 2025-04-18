@@ -1,0 +1,15 @@
+# Add these lines to your Postfix main.cf configuration
+
+# Content filter configuration
+content_filter = scan:llm-spam-filter:10025
+
+# Define the transport for the content filter
+transport_maps = hash:/etc/postfix/transport
+
+# Allow internal network to bypass content filtering (optional)
+# smtpd_client_restrictions = 
+#   check_client_access hash:/etc/postfix/internal_networks,
+#   permit
+
+# Increase the timeout for content filtering (optional)
+# content_filter_time_limit = 300s

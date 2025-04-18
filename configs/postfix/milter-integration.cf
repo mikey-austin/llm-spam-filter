@@ -1,0 +1,19 @@
+# Add these lines to your Postfix main.cf configuration for Milter integration
+
+# Enable Milter
+smtpd_milters = inet:127.0.0.1:10025
+
+# Define what to do if the Milter is unavailable
+milter_default_action = accept
+
+# Milter protocol version
+milter_protocol = 6
+
+# Milter connection timeout
+milter_connect_timeout = 30s
+
+# Milter command timeout
+milter_command_timeout = 30s
+
+# Milter content timeout
+milter_content_timeout = 300s
