@@ -2,9 +2,11 @@ package filter
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net/mail"
 	"strings"
 )
@@ -14,13 +16,21 @@ import (
 func extractTextFromMessage(msg *mail.Message) (string, error) {
 	contentType := msg.Header.Get("Content-Type")
 	
-	// If it's not a multipart message, just return the body
+	// If it's not a multipart message, decode and return the body
 	if !strings.Contains(strings.ToLower(contentType), "multipart/") {
 		bodyBytes, err := io.ReadAll(msg.Body)
 		if err != nil {
 			return "", err
 		}
-		return string(bodyBytes), nil
+		
+		// Check for Content-Transfer-Encoding and decode if necessary
+		encoding := msg.Header.Get("Content-Transfer-Encoding")
+		decodedBytes, err := decodeContent(bodyBytes, encoding)
+		if err != nil {
+			// If decoding fails, use the original content
+			return string(bodyBytes), nil
+		}
+		return string(decodedBytes), nil
 	}
 	
 	// Parse the Content-Type header to get the boundary
@@ -35,12 +45,20 @@ func extractTextFromMessage(msg *mail.Message) (string, error) {
 	}
 	
 	if !strings.HasPrefix(mediaType, "multipart/") {
-		// Not a multipart message, return the body
+		// Not a multipart message, decode and return the body
 		bodyBytes, err := io.ReadAll(msg.Body)
 		if err != nil {
 			return "", err
 		}
-		return string(bodyBytes), nil
+		
+		// Check for Content-Transfer-Encoding and decode if necessary
+		encoding := msg.Header.Get("Content-Transfer-Encoding")
+		decodedBytes, err := decodeContent(bodyBytes, encoding)
+		if err != nil {
+			// If decoding fails, use the original content
+			return string(bodyBytes), nil
+		}
+		return string(decodedBytes), nil
 	}
 	
 	// Get the boundary
@@ -88,12 +106,52 @@ func extractTextFromMessage(msg *mail.Message) (string, error) {
 			if err != nil {
 				continue // Skip this part if we can't read it
 			}
-			textContent.Write(partBytes)
+			
+			// Check for Content-Transfer-Encoding and decode if necessary
+			encoding := part.Header.Get("Content-Transfer-Encoding")
+			decodedBytes, err := decodeContent(partBytes, encoding)
+			if err != nil {
+				// If decoding fails, use the original content
+				textContent.Write(partBytes)
+			} else {
+				textContent.Write(decodedBytes)
+			}
 			textContent.WriteString("\n")
 		} else if strings.Contains(strings.ToLower(partContentType), "multipart/") {
-			// For nested multipart messages, we'll just skip them for simplicity
-			// In a production system, you might want to recursively process them
-			continue
+			// For nested multipart messages, we'll extract text recursively
+			nestedContentType := part.Header.Get("Content-Type")
+			nestedMediaType, nestedParams, err := mime.ParseMediaType(nestedContentType)
+			if err != nil || !strings.HasPrefix(nestedMediaType, "multipart/") {
+				continue
+			}
+			
+			// We don't actually need to use the nested boundary directly
+			// since we're creating a new mail.Message for the nested part
+			_, ok := nestedParams["boundary"]
+			if !ok {
+				continue
+			}
+			
+			// Read the entire part into a buffer
+			partBytes, err := io.ReadAll(part)
+			if err != nil {
+				continue
+			}
+			
+			// Create a new mail.Message for the nested part
+			nestedMsg := &mail.Message{
+				Header: mail.Header{
+					"Content-Type": []string{nestedContentType},
+				},
+				Body: bytes.NewReader(partBytes),
+			}
+			
+			// Extract text from the nested multipart message
+			nestedText, err := extractTextFromMessage(nestedMsg)
+			if err == nil && nestedText != "" {
+				textContent.WriteString(nestedText)
+				textContent.WriteString("\n")
+			}
 		}
 		// Skip other parts (attachments, etc.)
 	}
@@ -105,4 +163,27 @@ func extractTextFromMessage(msg *mail.Message) (string, error) {
 	
 	// If we didn't find any text content, return a placeholder
 	return "[No text content found in multipart message]", nil
+}
+
+// decodeContent decodes content based on the Content-Transfer-Encoding
+func decodeContent(content []byte, encoding string) ([]byte, error) {
+	switch strings.ToLower(encoding) {
+	case "base64":
+		// Decode base64 content
+		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(content)))
+		n, err := base64.StdEncoding.Decode(decoded, content)
+		if err != nil {
+			return nil, err
+		}
+		return decoded[:n], nil
+		
+	case "quoted-printable":
+		// Decode quoted-printable content
+		reader := quotedprintable.NewReader(bytes.NewReader(content))
+		return io.ReadAll(reader)
+		
+	default:
+		// For other encodings or no encoding, return the content as is
+		return content, nil
+	}
 }
