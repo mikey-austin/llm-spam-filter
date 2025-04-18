@@ -16,6 +16,7 @@ A Postfix content filter application that uses AI models to evaluate whether rec
 - Configurable body size limit to control LLM costs
 - Docker support for easy deployment
 - Non-blocking by default (adds headers rather than rejecting messages)
+- Shared configuration system between filter and CLI tool
 
 ## Architecture
 

@@ -11,14 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/mikey/llm-spam-filter/internal/adapters/bedrock"
-	"github.com/mikey/llm-spam-filter/internal/adapters/gemini"
-	"github.com/mikey/llm-spam-filter/internal/adapters/openai"
+	"github.com/mikey/llm-spam-filter/internal/config"
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/factory"
+	"github.com/mikey/llm-spam-filter/internal/logging"
+	"github.com/mikey/llm-spam-filter/internal/whitelist"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -49,17 +47,38 @@ var (
 	inputFile = flag.String("file", "", "Input email file (use stdin if not specified)")
 	verbose   = flag.Bool("verbose", false, "Enable verbose logging")
 	jsonLog   = flag.Bool("json-log", false, "Output logs in JSON format")
+	configFile = flag.String("config", "", "Path to config file (overrides command line flags)")
 )
 
 func main() {
 	flag.Parse()
 
+	var cfg *config.Config
+	var err error
+
 	// Initialize logger
-	logger := initLogger(*verbose, *jsonLog)
+	logger, err := logging.InitConsoleLogger(*verbose, *jsonLog)
+	if err != nil {
+		fmt.Printf("Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer logger.Sync()
 
+	// Load configuration from file if specified
+	if *configFile != "" {
+		cfg, err = config.New()
+		if err != nil {
+			logger.Fatal("Failed to load configuration", zap.Error(err))
+		}
+		logger.Info("Loaded configuration from file", zap.String("file", cfg.GetViper().ConfigFileUsed()))
+	} else {
+		// Create config from command line flags
+		cfg = createConfigFromFlags()
+	}
+
 	// Initialize LLM client
-	llmClient, err := createLLMClient(logger)
+	llmFactory := factory.NewLLMFactory(cfg, logger)
+	llmClient, err := llmFactory.CreateLLMClient()
 	if err != nil {
 		logger.Fatal("Failed to create LLM client", zap.Error(err))
 	}
@@ -71,8 +90,16 @@ func main() {
 		for i, domain := range whitelistedDomains {
 			whitelistedDomains[i] = strings.TrimSpace(domain)
 		}
+	} else {
+		whitelistedDomains = cfg.GetStringSlice("spam.whitelisted_domains")
+	}
+	
+	if len(whitelistedDomains) > 0 {
 		logger.Info("Using whitelisted domains", zap.Strings("domains", whitelistedDomains))
 	}
+
+	// Create whitelist checker
+	whitelistChecker := whitelist.NewChecker(whitelistedDomains, logger)
 
 	// Read email from file or stdin
 	var emailReader io.Reader
@@ -131,13 +158,13 @@ func main() {
 
 	// Analyze email
 	fmt.Printf("=== Analysis ===\n")
-	fmt.Printf("Provider: %s\n", *provider)
-	fmt.Printf("Spam threshold: %.2f\n", *spamThreshold)
+	fmt.Printf("Provider: %s\n", cfg.GetString("llm.provider"))
+	fmt.Printf("Spam threshold: %.2f\n", cfg.GetFloat64("spam.threshold"))
 	
 	startTime := time.Now()
 	
 	// Check if sender domain is whitelisted
-	if isWhitelisted(from, whitelistedDomains) {
+	if whitelistChecker.IsWhitelisted(from) {
 		fmt.Printf("\n=== Results ===\n")
 		fmt.Printf("Is spam: false (sender domain is whitelisted)\n")
 		fmt.Printf("Spam score: 0.0\n")
@@ -155,7 +182,7 @@ func main() {
 	duration := time.Since(startTime)
 
 	// Apply threshold
-	result.IsSpam = result.Score >= *spamThreshold
+	result.IsSpam = result.Score >= cfg.GetFloat64("spam.threshold")
 
 	// Print results
 	fmt.Printf("\n=== Results ===\n")
@@ -166,120 +193,59 @@ func main() {
 	fmt.Printf("Model used: %s\n", result.ModelUsed)
 	fmt.Printf("Processing time: %v\n", duration)
 	
-	// Close Gemini client if needed
-	if geminiClient, ok := llmClient.(*gemini.GeminiClient); ok {
-		if err := geminiClient.Close(); err != nil {
-			logger.Error("Failed to close Gemini client", zap.Error(err))
+	// Close any resources that need closing
+	if closer, ok := llmClient.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			logger.Error("Failed to close LLM client", zap.Error(err))
 		}
 	}
 }
 
-func createLLMClient(logger *zap.Logger) (core.LLMClient, error) {
+// createConfigFromFlags creates a configuration from command line flags
+func createConfigFromFlags() *config.Config {
+	v := config.NewEmptyViper()
+	
+	// Set LLM provider
+	v.Set("llm.provider", *provider)
+	
+	// Set provider-specific configuration
 	switch *provider {
 	case "bedrock":
-		// Initialize AWS client
-		awsCfg, err := config.LoadDefaultConfig(context.Background(),
-			config.WithRegion(*bedrockRegion),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load AWS configuration: %w", err)
-		}
-
-		// Initialize Bedrock client
-		bedrockClient := bedrockruntime.NewFromConfig(awsCfg)
-		return bedrock.NewBedrockClient(
-			bedrockClient,
-			*bedrockModelID,
-			*maxTokens,
-			float32(*temperature),
-			float32(*topP),
-			*maxBodySize,
-			logger,
-		), nil
-
+		v.Set("bedrock.region", *bedrockRegion)
+		v.Set("bedrock.model_id", *bedrockModelID)
+		v.Set("bedrock.max_tokens", *maxTokens)
+		v.Set("bedrock.temperature", *temperature)
+		v.Set("bedrock.top_p", *topP)
+		v.Set("bedrock.max_body_size", *maxBodySize)
 	case "gemini":
-		if *geminiAPIKey == "" {
-			return nil, fmt.Errorf("gemini API key is required")
-		}
-		
-		// Initialize Gemini client
-		factory := gemini.NewFactory(
-			*geminiAPIKey,
-			*geminiModelName,
-			*maxTokens,
-			float32(*temperature),
-			float32(*topP),
-			*maxBodySize,
-			logger,
-		)
-		return factory.CreateLLMClient()
-
+		v.Set("gemini.api_key", *geminiAPIKey)
+		v.Set("gemini.model_name", *geminiModelName)
+		v.Set("gemini.max_tokens", *maxTokens)
+		v.Set("gemini.temperature", *temperature)
+		v.Set("gemini.top_p", *topP)
+		v.Set("gemini.max_body_size", *maxBodySize)
 	case "openai":
-		if *openaiAPIKey == "" {
-			return nil, fmt.Errorf("openai API key is required")
+		v.Set("openai.api_key", *openaiAPIKey)
+		v.Set("openai.model_name", *openaiModelName)
+		v.Set("openai.max_tokens", *maxTokens)
+		v.Set("openai.temperature", *temperature)
+		v.Set("openai.top_p", *topP)
+		v.Set("openai.max_body_size", *maxBodySize)
+	}
+	
+	// Set spam threshold
+	v.Set("spam.threshold", *spamThreshold)
+	
+	// Set whitelisted domains
+	if *whitelistDomains != "" {
+		domains := strings.Split(*whitelistDomains, ",")
+		for i, domain := range domains {
+			domains[i] = strings.TrimSpace(domain)
 		}
-		
-		// Initialize OpenAI client
-		factory := openai.NewFactory(
-			*openaiAPIKey,
-			*openaiModelName,
-			*maxTokens,
-			float32(*temperature),
-			float32(*topP),
-			*maxBodySize,
-			logger,
-		)
-		return factory.CreateLLMClient()
-
-	default:
-		return nil, fmt.Errorf("invalid LLM provider: %s", *provider)
-	}
-}
-
-// isWhitelisted checks if the sender's domain is in the whitelist
-func isWhitelisted(from string, whitelistedDomains []string) bool {
-	if len(whitelistedDomains) == 0 {
-		return false
-	}
-
-	// Extract domain from email address
-	parts := strings.Split(from, "@")
-	if len(parts) != 2 {
-		return false
-	}
-	domain := strings.ToLower(parts[1])
-
-	// Check if domain is in whitelist
-	for _, whitelisted := range whitelistedDomains {
-		if strings.ToLower(whitelisted) == domain {
-			return true
-		}
-	}
-
-	return false
-}
-
-func initLogger(verbose bool, jsonFormat bool) *zap.Logger {
-	var level zapcore.Level
-	if verbose {
-		level = zapcore.DebugLevel
+		v.Set("spam.whitelisted_domains", domains)
 	} else {
-		level = zapcore.InfoLevel
+		v.Set("spam.whitelisted_domains", []string{})
 	}
-
-	var config zap.Config
-	if jsonFormat {
-		config = zap.NewProductionConfig()
-	} else {
-		config = zap.NewDevelopmentConfig()
-		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	}
-	config.Level = zap.NewAtomicLevelAt(level)
-
-	logger, err := config.Build()
-	if err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
-		os.Exit(1)
-	}
-	return logger
+	
+	return config.NewFromViper(v)
 }
