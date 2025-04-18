@@ -117,10 +117,13 @@ func (c *OpenAIClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 		MaxTokens:   c.maxTokens,
 		Temperature: float32(c.temperature),
 		TopP:        float32(c.topP),
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSON,
-		},
 	}
+	
+	// Add response format if supported by the client version
+	responseFormat := openai.ChatCompletionResponseFormat{
+		Type: "json",
+	}
+	req.ResponseFormat = &responseFormat
 	
 	// Call OpenAI API
 	resp, err := c.client.CreateChatCompletion(ctx, req)

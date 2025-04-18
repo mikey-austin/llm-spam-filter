@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// Email represents an email message to be analyzed
+// Email represents an email message
 type Email struct {
 	From    string
 	To      []string
@@ -22,13 +22,4 @@ type SpamAnalysisResult struct {
 	AnalyzedAt   time.Time
 	ModelUsed    string
 	ProcessingID string
-}
-
-// CacheEntry represents a cached spam analysis result
-type CacheEntry struct {
-	SenderEmail string
-	IsSpam      bool
-	Score       float64
-	LastSeen    time.Time
-	ExpiresAt   time.Time
 }

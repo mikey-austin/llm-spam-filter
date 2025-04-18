@@ -1,0 +1,32 @@
+From: support@company.com
+To: user@example.com
+Subject: Your recent support request #12345
+Date: Fri, 18 Apr 2025 14:25:00 +0000
+Message-ID: <support-12345@company.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Thank you for contacting our support team regarding your issue with the product activation.
+
+I've reviewed your case and found that your license key was incorrectly entered. Please try the following steps:
+
+1. Open the application settings
+2. Go to "License Management"
+3. Delete the current key
+4. Enter your license key again, making sure to include the dashes
+
+Your license key is: ABC-DEF-GHI-JKL-MNO
+
+If you continue to experience issues, please reply to this email and we'll be happy to assist you further.
+
+Best regards,
+Sarah Johnson
+Customer Support Team
+Company, Inc.
+
+Reference: #12345
+Support Hours: Monday-Friday, 9am-5pm EST
+Website: https://www.company.com/support

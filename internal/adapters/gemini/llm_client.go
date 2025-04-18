@@ -33,7 +33,7 @@ type SpamAnalysisResponse struct {
 	Explanation string  `json:"explanation"`
 }
 
-// NewGeminiClient creates a new Google Gemini client
+// NewGeminiClient creates a new Gemini client
 func NewGeminiClient(
 	apiKey string,
 	modelName string,
@@ -51,11 +51,9 @@ func NewGeminiClient(
 
 	// Create a generative model
 	model := client.GenerativeModel(modelName)
-	
-	// Configure the model
-	model.SetMaxOutputTokens(maxTokens)
-	model.SetTemperature(float64(temperature))
-	model.SetTopP(float64(topP))
+	model.SetTemperature(float32(temperature))
+	model.SetTopP(float32(topP))
+	model.SetMaxOutputTokens(int32(maxTokens))
 
 	return &GeminiClient{
 		client:      client,
@@ -82,6 +80,14 @@ Body:
 
 Respond only with the JSON object and nothing else.`,
 	}, nil
+}
+
+// Close closes the Gemini client
+func (c *GeminiClient) Close() error {
+	if c.client != nil {
+		return c.client.Close()
+	}
+	return nil
 }
 
 // truncateBody truncates the email body if it exceeds the maximum size
@@ -126,14 +132,11 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 	}
 
 	// Extract the response text
-	responseText, ok := resp.Candidates[0].Content.Parts[0].(genai.Text)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format from Gemini")
-	}
+	responseText := fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0])
 
 	// Parse the LLM's JSON response
 	var analysisResponse SpamAnalysisResponse
-	if err := json.Unmarshal([]byte(string(responseText)), &analysisResponse); err != nil {
+	if err := json.Unmarshal([]byte(responseText), &analysisResponse); err != nil {
 		// Try to extract JSON from the text response
 		jsonStart := 0
 		jsonEnd := len(responseText)
@@ -155,7 +158,7 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 		}
 		
 		if jsonStart < jsonEnd {
-			jsonStr := string(responseText)[jsonStart:jsonEnd]
+			jsonStr := responseText[jsonStart:jsonEnd]
 			if err := json.Unmarshal([]byte(jsonStr), &analysisResponse); err != nil {
 				return nil, fmt.Errorf("failed to parse LLM response as JSON: %w", err)
 			}
@@ -172,16 +175,7 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 		Explanation: analysisResponse.Explanation,
 		AnalyzedAt:  time.Now(),
 		ModelUsed:   c.modelName,
-		ProcessingID: resp.UsageMetadata.PromptTokenCount, // Using token count as a unique ID
 	}
 	
 	return result, nil
-}
-
-// Close closes the Gemini client
-func (c *GeminiClient) Close() error {
-	if c.client != nil {
-		return c.client.Close()
-	}
-	return nil
 }

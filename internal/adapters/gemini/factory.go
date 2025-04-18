@@ -1,11 +1,11 @@
-package openai
+package gemini
 
 import (
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"go.uber.org/zap"
 )
 
-// Factory creates new instances of OpenAIClient
+// Factory creates new instances of GeminiClient
 type Factory struct {
 	apiKey      string
 	modelName   string
@@ -16,7 +16,7 @@ type Factory struct {
 	logger      *zap.Logger
 }
 
-// NewFactory creates a new factory for OpenAIClient instances
+// NewFactory creates a new factory for GeminiClient instances
 func NewFactory(
 	apiKey string,
 	modelName string,
@@ -37,9 +37,9 @@ func NewFactory(
 	}
 }
 
-// CreateLLMClient creates a new OpenAIClient
+// CreateLLMClient creates a new GeminiClient
 func (f *Factory) CreateLLMClient() (core.LLMClient, error) {
-	return NewOpenAIClient(
+	return NewGeminiClient(
 		f.apiKey,
 		f.modelName,
 		f.maxTokens,
@@ -47,5 +47,5 @@ func (f *Factory) CreateLLMClient() (core.LLMClient, error) {
 		f.topP,
 		f.maxBodySize,
 		f.logger,
-	), nil
+	)
 }

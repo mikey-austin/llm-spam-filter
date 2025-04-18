@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"go.uber.org/zap"
 )
@@ -25,21 +25,6 @@ type BedrockClient struct {
 	promptFormat string
 }
 
-// BedrockRequest represents the request structure for Bedrock API
-type BedrockRequest struct {
-	Prompt            string  `json:"prompt"`
-	MaxTokens         int     `json:"max_tokens"`
-	Temperature       float32 `json:"temperature"`
-	TopP              float32 `json:"top_p"`
-	StopSequences     []string `json:"stop_sequences,omitempty"`
-}
-
-// BedrockResponse represents the response structure from Bedrock API
-type BedrockResponse struct {
-	Completion string  `json:"completion"`
-	StopReason string  `json:"stop_reason"`
-}
-
 // SpamAnalysisResponse represents the structured response from the LLM
 type SpamAnalysisResponse struct {
 	IsSpam      bool    `json:"is_spam"`
@@ -48,7 +33,7 @@ type SpamAnalysisResponse struct {
 	Explanation string  `json:"explanation"`
 }
 
-// NewBedrockClient creates a new Amazon Bedrock client
+// NewBedrockClient creates a new Bedrock client
 func NewBedrockClient(
 	client *bedrockruntime.Client,
 	modelID string,
@@ -115,61 +100,129 @@ func (c *BedrockClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*c
 	
 	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, truncatedBody)
 	
-	// Create the request payload
-	requestBody := BedrockRequest{
-		Prompt:      prompt,
-		MaxTokens:   c.maxTokens,
-		Temperature: c.temperature,
-		TopP:        c.topP,
+	// Create the request based on the model
+	var payload []byte
+	var err error
+	
+	if c.isAnthropicModel() {
+		// Anthropic Claude models
+		payload, err = json.Marshal(map[string]interface{}{
+			"prompt":      prompt,
+			"max_tokens_to_sample": c.maxTokens,
+			"temperature": c.temperature,
+			"top_p":       c.topP,
+		})
+	} else if c.isAmazonTitanModel() {
+		// Amazon Titan models
+		payload, err = json.Marshal(map[string]interface{}{
+			"inputText":  prompt,
+			"textGenerationConfig": map[string]interface{}{
+				"maxTokenCount": c.maxTokens,
+				"temperature":   c.temperature,
+				"topP":          c.topP,
+			},
+		})
+	} else {
+		// Default to a generic format
+		payload, err = json.Marshal(map[string]interface{}{
+			"prompt":      prompt,
+			"max_tokens":  c.maxTokens,
+			"temperature": c.temperature,
+			"top_p":       c.topP,
+		})
 	}
 	
-	requestBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request payload: %w", err)
 	}
 	
 	// Call Bedrock API
-	response, err := c.client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
-		ModelId:     aws.String(c.modelID),
+	resp, err := c.client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
+		ModelId:   &c.modelID,
+		Body:      payload,
+		Accept:    aws.String("application/json"),
 		ContentType: aws.String("application/json"),
-		Accept:      aws.String("application/json"),
-		Body:        requestBytes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to invoke Bedrock model: %w", err)
 	}
 	
-	// Parse the response
-	var bedrockResponse BedrockResponse
-	if err := json.Unmarshal(response.Body, &bedrockResponse); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal Bedrock response: %w", err)
-	}
+	// Parse the response based on the model
+	var responseText string
 	
+	if c.isAnthropicModel() {
+		// Anthropic Claude models
+		var claudeResp struct {
+			Completion string `json:"completion"`
+		}
+		if err := json.Unmarshal(resp.Body, &claudeResp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal Claude response: %w", err)
+		}
+		responseText = claudeResp.Completion
+	} else if c.isAmazonTitanModel() {
+		// Amazon Titan models
+		var titanResp struct {
+			Results []struct {
+				OutputText string `json:"outputText"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal(resp.Body, &titanResp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal Titan response: %w", err)
+		}
+		if len(titanResp.Results) > 0 {
+			responseText = titanResp.Results[0].OutputText
+		} else {
+			return nil, fmt.Errorf("empty response from Titan model")
+		}
+	} else {
+		// Try a generic approach
+		var genericResp struct {
+			Output string `json:"output"`
+			Text   string `json:"text"`
+			Response string `json:"response"`
+		}
+		if err := json.Unmarshal(resp.Body, &genericResp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal generic response: %w", err)
+		}
+		
+		// Try different fields
+		if genericResp.Output != "" {
+			responseText = genericResp.Output
+		} else if genericResp.Text != "" {
+			responseText = genericResp.Text
+		} else if genericResp.Response != "" {
+			responseText = genericResp.Response
+		} else {
+			// Just use the raw response as a string
+			responseText = string(resp.Body)
+		}
+	}
+
 	// Parse the LLM's JSON response
 	var analysisResponse SpamAnalysisResponse
-	if err := json.Unmarshal([]byte(bedrockResponse.Completion), &analysisResponse); err != nil {
+	if err := json.Unmarshal([]byte(responseText), &analysisResponse); err != nil {
 		// Try to extract JSON from the text response
 		jsonStart := 0
-		jsonEnd := len(bedrockResponse.Completion)
+		jsonEnd := len(responseText)
 		
 		// Find JSON start
-		for i := 0; i < len(bedrockResponse.Completion); i++ {
-			if bedrockResponse.Completion[i] == '{' {
+		for i := 0; i < len(responseText); i++ {
+			if responseText[i] == '{' {
 				jsonStart = i
 				break
 			}
 		}
 		
 		// Find JSON end
-		for i := len(bedrockResponse.Completion) - 1; i >= 0; i-- {
-			if bedrockResponse.Completion[i] == '}' {
+		for i := len(responseText) - 1; i >= 0; i-- {
+			if responseText[i] == '}' {
 				jsonEnd = i + 1
 				break
 			}
 		}
 		
 		if jsonStart < jsonEnd {
-			jsonStr := bedrockResponse.Completion[jsonStart:jsonEnd]
+			jsonStr := responseText[jsonStart:jsonEnd]
 			if err := json.Unmarshal([]byte(jsonStr), &analysisResponse); err != nil {
 				return nil, fmt.Errorf("failed to parse LLM response as JSON: %w", err)
 			}
@@ -186,8 +239,17 @@ func (c *BedrockClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*c
 		Explanation: analysisResponse.Explanation,
 		AnalyzedAt:  time.Now(),
 		ModelUsed:   c.modelID,
-		ProcessingID: string(response.ResponseMetadata.RequestID),
 	}
 	
 	return result, nil
+}
+
+// isAnthropicModel checks if the model is an Anthropic Claude model
+func (c *BedrockClient) isAnthropicModel() bool {
+	return strings.HasPrefix(c.modelID, "anthropic.claude")
+}
+
+// isAmazonTitanModel checks if the model is an Amazon Titan model
+func (c *BedrockClient) isAmazonTitanModel() bool {
+	return strings.HasPrefix(c.modelID, "amazon.titan")
 }
