@@ -72,6 +72,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.modify_subject", true)
 	v.SetDefault("server.subject_prefix", "[**SPAM**] ")
 	
+	// CLI defaults
+	v.SetDefault("cli.verbose", false)
+	
 	// Bedrock defaults
 	v.SetDefault("bedrock.region", "us-east-1")
 	v.SetDefault("bedrock.model_id", "anthropic.claude-v2")

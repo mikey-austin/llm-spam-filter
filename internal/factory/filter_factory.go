@@ -29,8 +29,9 @@ func NewFilterFactory(cfg *config.Config, logger *zap.Logger, spamService *core.
 // CreateEmailFilter creates an email filter based on the configuration
 func (f *FilterFactory) CreateEmailFilter() (ports.EmailFilter, error) {
 	filterType := f.cfg.GetString("server.filter_type")
-
-	if filterType == "postfix" {
+	
+	switch filterType {
+	case "postfix":
 		return filter.NewPostfixFilter(
 			f.spamService,
 			f.logger,
@@ -45,9 +46,13 @@ func (f *FilterFactory) CreateEmailFilter() (ports.EmailFilter, error) {
 			f.cfg.GetString("server.subject_prefix"),
 			f.cfg.GetBool("server.modify_subject"),
 		), nil
-	} else if filterType == "cli" {
-		return filter.NewCliFilter(f.spamService, f.logger)
+	case "cli":
+		return filter.NewCliFilter(
+			f.spamService,
+			f.logger,
+			f.cfg.GetBool("cli.verbose"),
+		)
+	default:
+		return nil, fmt.Errorf("unsupported filter type: %s", filterType)
 	}
-
-	return nil, fmt.Errorf("unsupported filter type: %s", filterType)
 }

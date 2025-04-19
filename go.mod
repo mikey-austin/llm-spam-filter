@@ -19,6 +19,7 @@ require (
 	github.com/google/generative-ai-go v0.19.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/sashabaranov/go-openai v1.38.2
+	go.uber.org/dig v1.18.1
 	golang.org/x/text v0.24.0
 	google.golang.org/api v0.186.0
 )
