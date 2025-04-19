@@ -15,7 +15,6 @@ import (
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"github.com/mikey/llm-spam-filter/internal/factory"
 	"github.com/mikey/llm-spam-filter/internal/logging"
-	"github.com/mikey/llm-spam-filter/internal/whitelist"
 	"go.uber.org/zap"
 )
 
@@ -32,21 +31,20 @@ var (
 	bedrockModelID = flag.String("bedrock-model", "anthropic.claude-v2", "Bedrock model ID")
 
 	// Gemini flags
-	geminiAPIKey   = flag.String("gemini-api-key", "", "API key for Google Gemini")
+	geminiAPIKey    = flag.String("gemini-api-key", "", "API key for Google Gemini")
 	geminiModelName = flag.String("gemini-model", "gemini-pro", "Gemini model name")
 
 	// OpenAI flags
-	openaiAPIKey   = flag.String("openai-api-key", "", "API key for OpenAI")
+	openaiAPIKey    = flag.String("openai-api-key", "", "API key for OpenAI")
 	openaiModelName = flag.String("openai-model", "gpt-4", "OpenAI model name")
 
 	// Spam detection flags
 	spamThreshold = flag.Float64("threshold", 0.7, "Threshold for spam detection")
-	whitelistDomains = flag.String("whitelist", "", "Comma-separated list of whitelisted domains")
 
 	// Input flags
-	inputFile = flag.String("file", "", "Input email file (use stdin if not specified)")
-	verbose   = flag.Bool("verbose", false, "Enable verbose logging")
-	jsonLog   = flag.Bool("json-log", false, "Output logs in JSON format")
+	inputFile  = flag.String("file", "", "Input email file (use stdin if not specified)")
+	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
+	jsonLog    = flag.Bool("json-log", false, "Output logs in JSON format")
 	configFile = flag.String("config", "", "Path to config file (overrides command line flags)")
 )
 
@@ -83,24 +81,26 @@ func main() {
 		logger.Fatal("Failed to create LLM client", zap.Error(err))
 	}
 
-	// Parse whitelisted domains
-	var whitelistedDomains []string
-	if *whitelistDomains != "" {
-		whitelistedDomains = strings.Split(*whitelistDomains, ",")
-		for i, domain := range whitelistedDomains {
-			whitelistedDomains[i] = strings.TrimSpace(domain)
+	// Create the CLI filter
+	spamService := core.NewSpamFilterService(llmClient, nil, logger, false, time.Duration(time.Duration.Hours(0)), cfg.GetFloat64("spam.threshold"), []string{})
+	filterFactory := factory.NewFilterFactory(cfg, logger, spamService)
+	filter, err := filterFactory.CreateEmailFilter()
+	if err != nil {
+		logger.Fatal("Failed to create cli filter", zap.Error(err))
+	}
+
+	email := readEmail(logger)
+	filter.ProcessEmail(context.TODO(), email)
+
+	// Close any resources that need closing
+	if closer, ok := llmClient.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			logger.Error("Failed to close LLM client", zap.Error(err))
 		}
-	} else {
-		whitelistedDomains = cfg.GetStringSlice("spam.whitelisted_domains")
 	}
-	
-	if len(whitelistedDomains) > 0 {
-		logger.Info("Using whitelisted domains", zap.Strings("domains", whitelistedDomains))
-	}
+}
 
-	// Create whitelist checker
-	whitelistChecker := whitelist.NewChecker(whitelistedDomains, logger)
-
+func readEmail(logger *zap.Logger) *core.Email {
 	// Read email from file or stdin
 	var emailReader io.Reader
 	if *inputFile != "" {
@@ -148,66 +148,19 @@ func main() {
 		email.Headers[k] = v
 	}
 
-	// Print email summary
-	fmt.Printf("\n=== Email Summary ===\n")
-	fmt.Printf("From: %s\n", from)
-	fmt.Printf("To: %s\n", to)
-	fmt.Printf("Subject: %s\n", subject)
-	fmt.Printf("Body length: %d bytes\n", len(body))
-	fmt.Printf("\n")
-
-	// Analyze email
-	fmt.Printf("=== Analysis ===\n")
-	fmt.Printf("Provider: %s\n", cfg.GetString("llm.provider"))
-	fmt.Printf("Spam threshold: %.2f\n", cfg.GetFloat64("spam.threshold"))
-	
-	startTime := time.Now()
-	
-	// Check if sender domain is whitelisted
-	if whitelistChecker.IsWhitelisted(from) {
-		fmt.Printf("\n=== Results ===\n")
-		fmt.Printf("Is spam: false (sender domain is whitelisted)\n")
-		fmt.Printf("Spam score: 0.0\n")
-		fmt.Printf("Confidence: 1.0\n")
-		fmt.Printf("Explanation: Sender domain is whitelisted\n")
-		fmt.Printf("Model used: whitelist\n")
-		fmt.Printf("Processing time: %v\n", time.Since(startTime))
-		return
-	}
-	
-	result, err := llmClient.AnalyzeEmail(context.Background(), email)
-	if err != nil {
-		logger.Fatal("Failed to analyze email", zap.Error(err))
-	}
-	duration := time.Since(startTime)
-
-	// Apply threshold
-	result.IsSpam = result.Score >= cfg.GetFloat64("spam.threshold")
-
-	// Print results
-	fmt.Printf("\n=== Results ===\n")
-	fmt.Printf("Is spam: %t\n", result.IsSpam)
-	fmt.Printf("Spam score: %.4f\n", result.Score)
-	fmt.Printf("Confidence: %.4f\n", result.Confidence)
-	fmt.Printf("Explanation: %s\n", result.Explanation)
-	fmt.Printf("Model used: %s\n", result.ModelUsed)
-	fmt.Printf("Processing time: %v\n", duration)
-	
-	// Close any resources that need closing
-	if closer, ok := llmClient.(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil {
-			logger.Error("Failed to close LLM client", zap.Error(err))
-		}
-	}
+	return email
 }
 
 // createConfigFromFlags creates a configuration from command line flags
 func createConfigFromFlags() *config.Config {
 	v := config.NewEmptyViper()
-	
+
+	// Set some cli specific settings
+	v.Set("server.filter_type", "cli")
+
 	// Set LLM provider
 	v.Set("llm.provider", *provider)
-	
+
 	// Set provider-specific configuration
 	switch *provider {
 	case "bedrock":
@@ -232,20 +185,9 @@ func createConfigFromFlags() *config.Config {
 		v.Set("openai.top_p", *topP)
 		v.Set("openai.max_body_size", *maxBodySize)
 	}
-	
+
 	// Set spam threshold
 	v.Set("spam.threshold", *spamThreshold)
-	
-	// Set whitelisted domains
-	if *whitelistDomains != "" {
-		domains := strings.Split(*whitelistDomains, ",")
-		for i, domain := range domains {
-			domains[i] = strings.TrimSpace(domain)
-		}
-		v.Set("spam.whitelisted_domains", domains)
-	} else {
-		v.Set("spam.whitelisted_domains", []string{})
-	}
-	
+
 	return config.NewFromViper(v)
 }
