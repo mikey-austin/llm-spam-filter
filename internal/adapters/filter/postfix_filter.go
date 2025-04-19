@@ -290,21 +290,34 @@ func (s *smtpSession) Data(r io.Reader) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
-	result, err := s.filter.service.AnalyzeEmail(ctx, email)
-	if err != nil {
+	// Analyze the email, but handle errors gracefully
+	var result *core.SpamAnalysisResult
+	var analysisErr error
+	
+	result, analysisErr = s.filter.service.AnalyzeEmail(ctx, email)
+	if analysisErr != nil {
 		s.filter.logger.Error("Failed to analyze email",
-			zap.Error(err),
+			zap.Error(analysisErr),
 			zap.String("sender", email.From),
 			zap.String("sender_domain", senderDomain))
-		return err
+		
+		// Create a fallback result that marks the email as non-spam but indicates an error
+		result = &core.SpamAnalysisResult{
+			IsSpam:      false,
+			Score:       0.0,
+			Confidence:  0.0,
+			Explanation: fmt.Sprintf("Error during analysis: %v", analysisErr),
+			ModelUsed:   "error",
+			AnalyzedAt:  time.Now(),
+		}
 	}
 	
 	// Add headers to the email
 	isSpam := result.IsSpam
 	
 	// Determine action based on spam status
-	if isSpam && s.filter.blockSpam {
-		// Reject the email
+	if isSpam && s.filter.blockSpam && analysisErr == nil {
+		// Only reject if it's spam AND there was no error in analysis
 		s.filter.logger.Info("Rejecting spam email",
 			zap.String("from", email.From),
 			zap.String("sender_domain", senderDomain),
@@ -321,6 +334,11 @@ func (s *smtpSession) Data(r io.Reader) error {
 	fmt.Fprintf(&modifiedEmail, "%s: %t\r\n", s.filter.spamHeader, isSpam)
 	fmt.Fprintf(&modifiedEmail, "%s: %.4f\r\n", s.filter.scoreHeader, result.Score)
 	fmt.Fprintf(&modifiedEmail, "%s: %s\r\n", s.filter.reasonHeader, result.Explanation)
+	
+	// Add error header if there was an analysis error
+	if analysisErr != nil {
+		fmt.Fprintf(&modifiedEmail, "X-Spam-Analysis-Error: %s\r\n", analysisErr.Error())
+	}
 	
 	// Modify the subject if it's spam and subject modification is enabled
 	if isSpam && s.filter.modifySubject && s.filter.subjectPrefix != "" {

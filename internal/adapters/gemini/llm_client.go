@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/mikey/llm-spam-filter/internal/core"
@@ -119,6 +120,9 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 	// Truncate the body if needed
 	truncatedBody := c.truncateBody(email.Body)
 	
+	// Sanitize the body to ensure valid UTF-8
+	truncatedBody = sanitizeUTF8(truncatedBody)
+	
 	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, truncatedBody)
 	
 	// Call Gemini API
@@ -178,4 +182,26 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 	}
 	
 	return result, nil
+}
+
+// sanitizeUTF8 ensures the string contains only valid UTF-8 characters
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	
+	// Replace invalid UTF-8 sequences with the Unicode replacement character
+	result := make([]rune, 0, len(s))
+	for i, r := range s {
+		if r == utf8.RuneError {
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size == 1 {
+				// Skip invalid UTF-8 sequences
+				continue
+			}
+		}
+		result = append(result, r)
+	}
+	
+	return string(result)
 }
