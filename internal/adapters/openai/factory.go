@@ -1,51 +1,45 @@
 package openai
 
 import (
+	"github.com/mikey/llm-spam-filter/internal/config"
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/utils"
+	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 )
 
 // Factory creates new instances of OpenAIClient
 type Factory struct {
-	apiKey      string
-	modelName   string
-	maxTokens   int
-	temperature float32
-	topP        float32
-	maxBodySize int
-	logger      *zap.Logger
+	cfg          *config.Config
+	logger       *zap.Logger
+	textProcessor *utils.TextProcessor
 }
 
 // NewFactory creates a new factory for OpenAIClient instances
-func NewFactory(
-	apiKey string,
-	modelName string,
-	maxTokens int,
-	temperature float32,
-	topP float32,
-	maxBodySize int,
-	logger *zap.Logger,
-) *Factory {
+func NewFactory(cfg *config.Config, logger *zap.Logger, textProcessor *utils.TextProcessor) *Factory {
 	return &Factory{
-		apiKey:      apiKey,
-		modelName:   modelName,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		topP:        topP,
-		maxBodySize: maxBodySize,
-		logger:      logger,
+		cfg:          cfg,
+		logger:       logger,
+		textProcessor: textProcessor,
 	}
 }
 
 // CreateLLMClient creates a new OpenAIClient
 func (f *Factory) CreateLLMClient() (core.LLMClient, error) {
+	// Get OpenAI config
+	openaiCfg := f.cfg.GetOpenAI()
+	
+	// Create OpenAI client
+	client := openai.NewClient(openaiCfg.APIKey)
+	
 	return NewOpenAIClient(
-		f.apiKey,
-		f.modelName,
-		f.maxTokens,
-		f.temperature,
-		f.topP,
-		f.maxBodySize,
+		client,
+		openaiCfg.ModelName,
+		openaiCfg.MaxTokens,
+		openaiCfg.Temperature,
+		openaiCfg.TopP,
+		openaiCfg.MaxBodySize,
 		f.logger,
+		f.textProcessor,
 	), nil
 }

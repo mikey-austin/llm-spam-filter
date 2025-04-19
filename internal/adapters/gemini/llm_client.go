@@ -10,7 +10,6 @@ import (
 	"github.com/mikey/llm-spam-filter/internal/core"
 	"github.com/mikey/llm-spam-filter/internal/utils"
 	"go.uber.org/zap"
-	"google.golang.org/api/option"
 )
 
 // GeminiClient is an implementation of the LLMClient interface using Google Gemini
@@ -26,7 +25,6 @@ type GeminiClient struct {
 	promptFormat string
 	textProcessor *utils.TextProcessor
 }
-}
 
 // SpamAnalysisResponse represents the structured response from the LLM
 type SpamAnalysisResponse struct {
@@ -38,7 +36,7 @@ type SpamAnalysisResponse struct {
 
 // NewGeminiClient creates a new Gemini client
 func NewGeminiClient(
-	apiKey string,
+	client *genai.Client,
 	modelName string,
 	maxTokens int,
 	temperature float32,
@@ -47,27 +45,20 @@ func NewGeminiClient(
 	logger *zap.Logger,
 	textProcessor *utils.TextProcessor,
 ) (*GeminiClient, error) {
-	// Create a new Gemini client
-	client, err := genai.NewClient(context.Background(), option.WithAPIKey(apiKey))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
-	}
-
-	// Create a generative model
 	model := client.GenerativeModel(modelName)
 	model.SetTemperature(float32(temperature))
 	model.SetTopP(float32(topP))
 	model.SetMaxOutputTokens(int32(maxTokens))
-
+	
 	return &GeminiClient{
-		client:      client,
-		model:       model,
-		modelName:   modelName,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		topP:        topP,
-		maxBodySize: maxBodySize,
-		logger:      logger,
+		client:       client,
+		model:        model,
+		modelName:    modelName,
+		maxTokens:    maxTokens,
+		temperature:  temperature,
+		topP:         topP,
+		maxBodySize:  maxBodySize,
+		logger:       logger,
 		textProcessor: textProcessor,
 		promptFormat: `You are a spam detection system. Analyze the following email and determine if it's spam.
 Respond with a JSON object containing:
@@ -86,17 +77,6 @@ Body:
 Respond only with the JSON object and nothing else.`,
 	}, nil
 }
-
-// Close closes the Gemini client
-func (c *GeminiClient) Close() error {
-	if c.client != nil {
-		return c.client.Close()
-	}
-	return nil
-}
-
-// truncateBody truncates the email body if it exceeds the maximum size
-func (c *GeminiClient) truncateBody(body string) string {
 
 // AnalyzeEmail analyzes an email to determine if it's spam
 func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*core.SpamAnalysisResult, error) {
@@ -171,26 +151,4 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 	}
 	
 	return result, nil
-}
-
-// sanitizeUTF8 ensures the string contains only valid UTF-8 characters
-func sanitizeUTF8(s string) string {
-	if utf8.ValidString(s) {
-		return s
-	}
-	
-	// Replace invalid UTF-8 sequences with the Unicode replacement character
-	result := make([]rune, 0, len(s))
-	for i, r := range s {
-		if r == utf8.RuneError {
-			_, size := utf8.DecodeRuneInString(s[i:])
-			if size == 1 {
-				// Skip invalid UTF-8 sequences
-				continue
-			}
-		}
-		result = append(result, r)
-	}
-	
-	return string(result)
 }

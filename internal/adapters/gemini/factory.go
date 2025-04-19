@@ -29,20 +29,23 @@ func NewFactory(cfg *config.Config, logger *zap.Logger, textProcessor *utils.Tex
 
 // CreateClient creates a new Gemini client
 func (f *Factory) CreateClient() (*GeminiClient, error) {
+	// Get Gemini config
+	geminiCfg := f.cfg.GetGemini()
+	
 	// Create Gemini client
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(f.cfg.Gemini.APIKey))
+	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiCfg.APIKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 	
 	return NewGeminiClient(
 		client,
-		f.cfg.Gemini.ModelName,
-		f.cfg.Gemini.MaxTokens,
-		f.cfg.Gemini.Temperature,
-		f.cfg.Gemini.TopP,
-		f.cfg.Gemini.MaxBodySize,
+		geminiCfg.ModelName,
+		geminiCfg.MaxTokens,
+		geminiCfg.Temperature,
+		geminiCfg.TopP,
+		geminiCfg.MaxBodySize,
 		f.logger,
 		f.textProcessor,
 	)

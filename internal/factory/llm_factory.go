@@ -30,7 +30,9 @@ func NewLLMFactory(cfg *config.Config, logger *zap.Logger, textProcessor *utils.
 
 // CreateLLMClient creates a new LLM client based on the configuration
 func (f *LLMFactory) CreateLLMClient() (core.LLMClient, error) {
-	switch f.cfg.LLM.Provider {
+	llmConfig := f.cfg.GetLLM()
+	
+	switch llmConfig.Provider {
 	case "bedrock":
 		factory := bedrock.NewFactory(f.cfg, f.logger, f.textProcessor)
 		return factory.CreateClient()
@@ -39,8 +41,9 @@ func (f *LLMFactory) CreateLLMClient() (core.LLMClient, error) {
 		return factory.CreateClient()
 	case "openai":
 		factory := openai.NewFactory(f.cfg, f.logger, f.textProcessor)
-		return factory.CreateClient(), nil
+		client, err := factory.CreateLLMClient()
+		return client, err
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %s", f.cfg.LLM.Provider)
+		return nil, fmt.Errorf("unsupported LLM provider: %s", llmConfig.Provider)
 	}
 }

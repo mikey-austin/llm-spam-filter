@@ -24,7 +24,6 @@ type OpenAIClient struct {
 	promptFormat string
 	textProcessor *utils.TextProcessor
 }
-}
 
 // SpamAnalysisResponse represents the structured response from the LLM
 type SpamAnalysisResponse struct {
@@ -36,7 +35,7 @@ type SpamAnalysisResponse struct {
 
 // NewOpenAIClient creates a new OpenAI client
 func NewOpenAIClient(
-	apiKey string,
+	client *openai.Client,
 	modelName string,
 	maxTokens int,
 	temperature float32,
@@ -45,17 +44,14 @@ func NewOpenAIClient(
 	logger *zap.Logger,
 	textProcessor *utils.TextProcessor,
 ) *OpenAIClient {
-	// Create a new OpenAI client
-	client := openai.NewClient(apiKey)
-
 	return &OpenAIClient{
-		client:      client,
-		modelName:   modelName,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		topP:        topP,
-		maxBodySize: maxBodySize,
-		logger:      logger,
+		client:       client,
+		modelName:    modelName,
+		maxTokens:    maxTokens,
+		temperature:  temperature,
+		topP:         topP,
+		maxBodySize:  maxBodySize,
+		logger:       logger,
 		textProcessor: textProcessor,
 		promptFormat: `You are a spam detection system. Analyze the following email and determine if it's spam.
 Respond with a JSON object containing:
@@ -73,21 +69,6 @@ Body:
 
 Respond only with the JSON object and nothing else.`,
 	}
-}
-
-// truncateBody truncates the email body if it exceeds the maximum size
-func (c *OpenAIClient) truncateBody(body string) string {
-	if c.maxBodySize <= 0 || len(body) <= c.maxBodySize {
-		return body
-	}
-	
-	truncated := body[:c.maxBodySize]
-	c.logger.Debug("Email body truncated",
-		zap.Int("original_size", len(body)),
-		zap.Int("truncated_size", len(truncated)),
-		zap.Int("max_size", c.maxBodySize))
-	
-	return truncated + "\n[... Content truncated due to size limits ...]"
 }
 
 // AnalyzeEmail analyzes an email to determine if it's spam

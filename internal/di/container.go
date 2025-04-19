@@ -28,6 +28,13 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 
+	// Register text processor
+	if err := container.Provide(func(logger *zap.Logger) *utils.TextProcessor {
+		return utils.NewTextProcessor(logger)
+	}); err != nil {
+		return nil, err
+	}
+
 	// Register factories
 	if err := container.Provide(factory.NewLLMFactory); err != nil {
 		return nil, err
@@ -36,9 +43,6 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(factory.NewFilterFactory); err != nil {
-		return nil, err
-	}
-	if err := container.Provide(factory.NewTextProcessorFactory); err != nil {
 		return nil, err
 	}
 
@@ -100,9 +104,3 @@ func BuildContainer() (*dig.Container, error) {
 
 	return container, nil
 }
-	// Register text processor
-	if err := container.Provide(func(f *factory.TextProcessorFactory) *utils.TextProcessor {
-		return f.CreateTextProcessor()
-	}); err != nil {
-		return nil, err
-	}
