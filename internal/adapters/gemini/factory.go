@@ -1,51 +1,49 @@
 package gemini
 
 import (
-	"github.com/mikey/llm-spam-filter/internal/core"
+	"context"
+	"fmt"
+
+	"github.com/google/generative-ai-go/genai"
+	"github.com/mikey/llm-spam-filter/internal/config"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 	"go.uber.org/zap"
+	"google.golang.org/api/option"
 )
 
-// Factory creates new instances of GeminiClient
+// Factory creates Gemini clients
 type Factory struct {
-	apiKey      string
-	modelName   string
-	maxTokens   int
-	temperature float32
-	topP        float32
-	maxBodySize int
-	logger      *zap.Logger
+	cfg          *config.Config
+	logger       *zap.Logger
+	textProcessor *utils.TextProcessor
 }
 
-// NewFactory creates a new factory for GeminiClient instances
-func NewFactory(
-	apiKey string,
-	modelName string,
-	maxTokens int,
-	temperature float32,
-	topP float32,
-	maxBodySize int,
-	logger *zap.Logger,
-) *Factory {
+// NewFactory creates a new Gemini factory
+func NewFactory(cfg *config.Config, logger *zap.Logger, textProcessor *utils.TextProcessor) *Factory {
 	return &Factory{
-		apiKey:      apiKey,
-		modelName:   modelName,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		topP:        topP,
-		maxBodySize: maxBodySize,
-		logger:      logger,
+		cfg:    cfg,
+		logger: logger,
+		textProcessor: textProcessor,
 	}
 }
 
-// CreateLLMClient creates a new GeminiClient
-func (f *Factory) CreateLLMClient() (core.LLMClient, error) {
+// CreateClient creates a new Gemini client
+func (f *Factory) CreateClient() (*GeminiClient, error) {
+	// Create Gemini client
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(f.cfg.Gemini.APIKey))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+	}
+	
 	return NewGeminiClient(
-		f.apiKey,
-		f.modelName,
-		f.maxTokens,
-		f.temperature,
-		f.topP,
-		f.maxBodySize,
+		client,
+		f.cfg.Gemini.ModelName,
+		f.cfg.Gemini.MaxTokens,
+		f.cfg.Gemini.Temperature,
+		f.cfg.Gemini.TopP,
+		f.cfg.Gemini.MaxBodySize,
 		f.logger,
+		f.textProcessor,
 	)
 }

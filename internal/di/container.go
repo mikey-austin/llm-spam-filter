@@ -11,6 +11,7 @@ import (
 	"github.com/mikey/llm-spam-filter/internal/factory"
 	"github.com/mikey/llm-spam-filter/internal/logging"
 	"github.com/mikey/llm-spam-filter/internal/ports"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 )
 
 // BuildContainer creates and configures a dependency injection container
@@ -35,6 +36,9 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(factory.NewFilterFactory); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(factory.NewTextProcessorFactory); err != nil {
 		return nil, err
 	}
 
@@ -96,3 +100,9 @@ func BuildContainer() (*dig.Container, error) {
 
 	return container, nil
 }
+	// Register text processor
+	if err := container.Provide(func(f *factory.TextProcessorFactory) *utils.TextProcessor {
+		return f.CreateTextProcessor()
+	}); err != nil {
+		return nil, err
+	}

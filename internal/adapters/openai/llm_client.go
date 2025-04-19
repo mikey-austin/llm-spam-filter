@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,8 @@ type OpenAIClient struct {
 	maxBodySize  int
 	logger       *zap.Logger
 	promptFormat string
+	textProcessor *utils.TextProcessor
+}
 }
 
 // SpamAnalysisResponse represents the structured response from the LLM
@@ -40,6 +43,7 @@ func NewOpenAIClient(
 	topP float32,
 	maxBodySize int,
 	logger *zap.Logger,
+	textProcessor *utils.TextProcessor,
 ) *OpenAIClient {
 	// Create a new OpenAI client
 	client := openai.NewClient(apiKey)
@@ -52,6 +56,7 @@ func NewOpenAIClient(
 		topP:        topP,
 		maxBodySize: maxBodySize,
 		logger:      logger,
+		textProcessor: textProcessor,
 		promptFormat: `You are a spam detection system. Analyze the following email and determine if it's spam.
 Respond with a JSON object containing:
 - is_spam: boolean (true if spam, false if not)
@@ -96,10 +101,10 @@ func (c *OpenAIClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 		}
 	}
 	
-	// Truncate the body if needed
-	truncatedBody := c.truncateBody(email.Body)
+	// Process the body (truncate and sanitize)
+	processedBody := c.textProcessor.ProcessText(email.Body, c.maxBodySize)
 	
-	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, truncatedBody)
+	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, processedBody)
 	
 	// Create the request
 	req := openai.ChatCompletionRequest{

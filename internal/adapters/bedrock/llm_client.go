@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -23,6 +24,7 @@ type BedrockClient struct {
 	maxBodySize  int
 	logger       *zap.Logger
 	promptFormat string
+	textProcessor *utils.TextProcessor
 }
 
 // SpamAnalysisResponse represents the structured response from the LLM
@@ -42,15 +44,17 @@ func NewBedrockClient(
 	topP float32,
 	maxBodySize int,
 	logger *zap.Logger,
+	textProcessor *utils.TextProcessor,
 ) *BedrockClient {
 	return &BedrockClient{
-		client:      client,
-		modelID:     modelID,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		topP:        topP,
-		maxBodySize: maxBodySize,
-		logger:      logger,
+		client:       client,
+		modelID:      modelID,
+		maxTokens:    maxTokens,
+		temperature:  temperature,
+		topP:         topP,
+		maxBodySize:  maxBodySize,
+		logger:       logger,
+		textProcessor: textProcessor,
 		promptFormat: `You are a spam detection system. Analyze the following email and determine if it's spam.
 Respond with a JSON object containing:
 - is_spam: boolean (true if spam, false if not)
@@ -69,20 +73,7 @@ Respond only with the JSON object and nothing else.`,
 	}
 }
 
-// truncateBody truncates the email body if it exceeds the maximum size
-func (c *BedrockClient) truncateBody(body string) string {
-	if c.maxBodySize <= 0 || len(body) <= c.maxBodySize {
-		return body
-	}
-	
-	truncated := body[:c.maxBodySize]
-	c.logger.Debug("Email body truncated",
-		zap.Int("original_size", len(body)),
-		zap.Int("truncated_size", len(truncated)),
-		zap.Int("max_size", c.maxBodySize))
-	
-	return truncated + "\n[... Content truncated due to size limits ...]"
-}
+// isAnthropicModel checks if the model is an Anthropic Claude model
 
 // AnalyzeEmail analyzes an email to determine if it's spam
 func (c *BedrockClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*core.SpamAnalysisResult, error) {
@@ -95,10 +86,10 @@ func (c *BedrockClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*c
 		}
 	}
 	
-	// Truncate the body if needed
-	truncatedBody := c.truncateBody(email.Body)
+	// Process the body (truncate and sanitize)
+	processedBody := c.textProcessor.ProcessText(email.Body, c.maxBodySize)
 	
-	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, truncatedBody)
+	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, processedBody)
 	
 	// Create the request based on the model
 	var payload []byte

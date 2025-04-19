@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-	"unicode/utf8"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 	"go.uber.org/zap"
 	"google.golang.org/api/option"
 )
@@ -24,6 +24,8 @@ type GeminiClient struct {
 	maxBodySize  int
 	logger       *zap.Logger
 	promptFormat string
+	textProcessor *utils.TextProcessor
+}
 }
 
 // SpamAnalysisResponse represents the structured response from the LLM
@@ -43,6 +45,7 @@ func NewGeminiClient(
 	topP float32,
 	maxBodySize int,
 	logger *zap.Logger,
+	textProcessor *utils.TextProcessor,
 ) (*GeminiClient, error) {
 	// Create a new Gemini client
 	client, err := genai.NewClient(context.Background(), option.WithAPIKey(apiKey))
@@ -65,6 +68,7 @@ func NewGeminiClient(
 		topP:        topP,
 		maxBodySize: maxBodySize,
 		logger:      logger,
+		textProcessor: textProcessor,
 		promptFormat: `You are a spam detection system. Analyze the following email and determine if it's spam.
 Respond with a JSON object containing:
 - is_spam: boolean (true if spam, false if not)
@@ -93,18 +97,6 @@ func (c *GeminiClient) Close() error {
 
 // truncateBody truncates the email body if it exceeds the maximum size
 func (c *GeminiClient) truncateBody(body string) string {
-	if c.maxBodySize <= 0 || len(body) <= c.maxBodySize {
-		return body
-	}
-	
-	truncated := body[:c.maxBodySize]
-	c.logger.Debug("Email body truncated",
-		zap.Int("original_size", len(body)),
-		zap.Int("truncated_size", len(truncated)),
-		zap.Int("max_size", c.maxBodySize))
-	
-	return truncated + "\n[... Content truncated due to size limits ...]"
-}
 
 // AnalyzeEmail analyzes an email to determine if it's spam
 func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*core.SpamAnalysisResult, error) {
@@ -117,13 +109,10 @@ func (c *GeminiClient) AnalyzeEmail(ctx context.Context, email *core.Email) (*co
 		}
 	}
 	
-	// Truncate the body if needed
-	truncatedBody := c.truncateBody(email.Body)
+	// Process the body (truncate and sanitize)
+	processedBody := c.textProcessor.ProcessText(email.Body, c.maxBodySize)
 	
-	// Sanitize the body to ensure valid UTF-8
-	truncatedBody = sanitizeUTF8(truncatedBody)
-	
-	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, truncatedBody)
+	prompt := fmt.Sprintf(c.promptFormat, email.From, to, email.Subject, processedBody)
 	
 	// Call Gemini API
 	resp, err := c.model.GenerateContent(ctx, genai.Text(prompt))

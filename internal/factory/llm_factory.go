@@ -3,40 +3,44 @@ package factory
 import (
 	"fmt"
 
+	"github.com/mikey/llm-spam-filter/internal/adapters/bedrock"
+	"github.com/mikey/llm-spam-filter/internal/adapters/gemini"
+	"github.com/mikey/llm-spam-filter/internal/adapters/openai"
 	"github.com/mikey/llm-spam-filter/internal/config"
 	"github.com/mikey/llm-spam-filter/internal/core"
+	"github.com/mikey/llm-spam-filter/internal/utils"
 	"go.uber.org/zap"
 )
 
-// LLMFactory creates LLM clients based on configuration
+// LLMFactory creates LLM clients
 type LLMFactory struct {
-	cfg    *config.Config
-	logger *zap.Logger
+	cfg          *config.Config
+	logger       *zap.Logger
+	textProcessor *utils.TextProcessor
 }
 
 // NewLLMFactory creates a new LLM factory
-func NewLLMFactory(cfg *config.Config, logger *zap.Logger) *LLMFactory {
+func NewLLMFactory(cfg *config.Config, logger *zap.Logger, textProcessor *utils.TextProcessor) *LLMFactory {
 	return &LLMFactory{
-		cfg:    cfg,
-		logger: logger,
+		cfg:          cfg,
+		logger:       logger,
+		textProcessor: textProcessor,
 	}
 }
 
-// CreateLLMClient creates an LLM client based on the configuration
+// CreateLLMClient creates a new LLM client based on the configuration
 func (f *LLMFactory) CreateLLMClient() (core.LLMClient, error) {
-	provider := f.cfg.GetString("llm.provider")
-	
-	switch provider {
+	switch f.cfg.LLM.Provider {
 	case "bedrock":
-		factory := NewBedrockFactory(f.cfg, f.logger)
-		return factory.CreateLLMClient()
+		factory := bedrock.NewFactory(f.cfg, f.logger, f.textProcessor)
+		return factory.CreateClient()
 	case "gemini":
-		factory := NewGeminiFactory(f.cfg, f.logger)
-		return factory.CreateLLMClient()
+		factory := gemini.NewFactory(f.cfg, f.logger, f.textProcessor)
+		return factory.CreateClient()
 	case "openai":
-		factory := NewOpenAIFactory(f.cfg, f.logger)
-		return factory.CreateLLMClient()
+		factory := openai.NewFactory(f.cfg, f.logger, f.textProcessor)
+		return factory.CreateClient(), nil
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %s", provider)
+		return nil, fmt.Errorf("unsupported LLM provider: %s", f.cfg.LLM.Provider)
 	}
 }
